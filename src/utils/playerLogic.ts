@@ -441,5 +441,21 @@ export function resolveStageTapZone(
   return 'center';
 }
 
+export function resolveMaxEpisodeDuration(
+  durations: ReadonlyArray<number | null | undefined>
+): number {
+  let maxSeconds = 0;
+  for (const val of durations) {
+    if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
+      const rounded = Math.round(val);
+      if (rounded > maxSeconds) {
+        maxSeconds = rounded;
+      }
+    }
+  }
+  return maxSeconds;
+}
+
+
 
 

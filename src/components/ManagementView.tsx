@@ -1,17 +1,29 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link2, Plus, Trash2, Upload, UserPlus } from 'lucide-react';
+import {
+  Check,
+  Edit3,
+  FolderOpen,
+  Link2,
+  Loader2,
+  Plus,
+  Trash2,
+  Upload,
+  UserPlus,
+} from 'lucide-react';
 import { api } from '../api/client';
 import type {
   AnimeDetail,
   AnimeSummary,
   AudioDub,
+  Episode,
   Genre,
   QualityTier,
   SubtitleMode,
   UserAccount,
   UserRole,
 } from '../types';
+import { extractGoogleDriveFolderId } from '../utils/driveFolderParser';
 import {
   buildLuxSourceDriveUrl,
   DUB_LABELS,
@@ -22,6 +34,7 @@ import {
   SUB_LABELS,
 } from '../utils/playerLogic';
 import { canDeleteUser } from '../utils/rbacLogic';
+import { probeVideoDuration } from '../utils/videoProbe';
 
 interface ManagementViewProps {
   currentUser: UserAccount;
@@ -59,15 +72,40 @@ export function ManagementView({
   const [newGenreIds, setNewGenreIds] = useState<number[]>([]);
   const [newCoverPath, setNewCoverPath] = useState('');
   const [coverPreviewName, setCoverPreviewName] = useState('');
+  const [newDriveFolderUrl, setNewDriveFolderUrl] = useState('');
+  const [folderAudioDub, setFolderAudioDub] = useState<AudioDub>('jp');
+  const [folderSubtitleMode, setFolderSubtitleMode] =
+    useState<SubtitleMode>('pl');
+  const [folderMaxQuality, setFolderMaxQuality] =
+    useState<QualityTier>('1080p');
+  const [folderPreviewEpisodes, setFolderPreviewEpisodes] = useState<
+    Array<{
+      fileId: string;
+      filename: string;
+      episodeNumber: number;
+      title: string;
+      luxSourceUrl: string;
+    }>
+  >([]);
+  const [folderPreviewLoading, setFolderPreviewLoading] = useState(false);
+  const [creatingAnime, setCreatingAnime] = useState(false);
 
-  // Episode Form
+  // Episode Form (Intro & Outro are optional)
   const [epNumber, setEpNumber] = useState('1');
   const [epTitle, setEpTitle] = useState('');
   const [epSynopsis, setEpSynopsis] = useState('');
-  const [epIntroStart, setEpIntroStart] = useState('00:00');
-  const [epIntroEnd, setEpIntroEnd] = useState('01:30');
-  const [epOutroStart, setEpOutroStart] = useState('22:00');
-  const [epOutroEnd, setEpOutroEnd] = useState('23:30');
+  const [epIntroStart, setEpIntroStart] = useState('');
+  const [epIntroEnd, setEpIntroEnd] = useState('');
+  const [epOutroStart, setEpOutroStart] = useState('');
+  const [epOutroEnd, setEpOutroEnd] = useState('');
+
+  // Inline Intro/Outro Editor for existing episodes
+  const [editingIntroEpId, setEditingIntroEpId] = useState<number | null>(null);
+  const [editIntroStart, setEditIntroStart] = useState('');
+  const [editIntroEnd, setEditIntroEnd] = useState('');
+  const [editOutroStart, setEditOutroStart] = useState('');
+  const [editOutroEnd, setEditOutroEnd] = useState('');
+  const [savingIntroEp, setSavingIntroEp] = useState(false);
 
   // Video Variant Upload / External Source State
   const [uploadMode, setUploadMode] = useState<UploadMode>('file');
@@ -90,7 +128,6 @@ export function ManagementView({
   const [gdriveMode, setGdriveMode] = useState<'preview' | 'direct'>('preview');
   const [externalMaxQuality, setExternalMaxQuality] =
     useState<QualityTier>('1080p');
-  const [externalDurationInput, setExternalDurationInput] = useState('24:00');
 
   // Relations & Genres State
   const [relSourceId, setRelSourceId] = useState<string>(
@@ -181,6 +218,52 @@ export function ManagementView({
     }
   }
 
+  async function handlePreviewDriveFolder() {
+    clearFeedback();
+    if (!newDriveFolderUrl.trim()) {
+      setErrorMessage('Wklej najpierw link do folderu Google Drive.');
+      return;
+    }
+    setFolderPreviewLoading(true);
+    try {
+      const res = await api.previewDriveFolder(newDriveFolderUrl.trim());
+      setFolderPreviewEpisodes(res.episodes);
+      setStatusMessage(
+        `W folderze wykryto ${res.episodes.length} ponumerowanych odcinków gotowych do importu przez LuxSource.`
+      );
+    } catch (err) {
+      setFolderPreviewEpisodes([]);
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Nie udało się odczytać zawartości folderu.'
+      );
+    } finally {
+      setFolderPreviewLoading(false);
+    }
+  }
+
+  async function probeImportedEpisodesDurations(
+    animeId: number,
+    imported: Array<{ variantId: number; externalUrl: string }>
+  ) {
+    let updatedAny = false;
+    for (const item of imported) {
+      const detected = await probeVideoDuration(item.externalUrl, 6000);
+      if (detected > 0) {
+        try {
+          await api.reportVariantDuration(item.variantId, detected);
+          updatedAny = true;
+        } catch {
+          // ignore background sync failures
+        }
+      }
+    }
+    if (updatedAny) {
+      await loadSelectedDetail(animeId);
+    }
+  }
+
   async function handleCreateAnime(e: FormEvent) {
     e.preventDefault();
     clearFeedback();
@@ -188,8 +271,9 @@ export function ManagementView({
       setErrorMessage('Podaj tytuł anime.');
       return;
     }
+    setCreatingAnime(true);
     try {
-      const { id } = await api.createAnime({
+      const res = await api.createAnime({
         title: newTitle.trim(),
         originalTitle: newOriginalTitle.trim(),
         synopsis: newSynopsis.trim(),
@@ -198,6 +282,10 @@ export function ManagementView({
         status: newStatus,
         coverPath: newCoverPath,
         genreIds: newGenreIds,
+        driveFolderUrl: newDriveFolderUrl.trim() || undefined,
+        folderAudioDub,
+        folderSubtitleMode,
+        folderMaxQuality,
       });
       setNewTitle('');
       setNewOriginalTitle('');
@@ -206,13 +294,29 @@ export function ManagementView({
       setNewCoverPath('');
       setCoverPreviewName('');
       setNewGenreIds([]);
+      setNewDriveFolderUrl('');
+      setFolderPreviewEpisodes([]);
       await onRefreshAll();
-      setSelectedAnimeId(id);
-      setStatusMessage('Nowa seria anime została dodana.');
+      setSelectedAnimeId(res.id);
+      await loadSelectedDetail(res.id);
+
+      const importedCount = res.importedEpisodesCount || 0;
+      if (importedCount > 0) {
+        setStatusMessage(
+          `Dodano nową serię anime oraz zaimportowano ${importedCount} odcinków z folderu Google Drive (LuxSource). Po prawej stronie możesz teraz opcjonalnie uzupełnić Intro i Ending.`
+        );
+        if (res.importedEpisodes && res.importedEpisodes.length > 0) {
+          void probeImportedEpisodesDurations(res.id, res.importedEpisodes);
+        }
+      } else {
+        setStatusMessage('Nowa seria anime została dodana.');
+      }
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Nie udało się dodać anime.'
       );
+    } finally {
+      setCreatingAnime(false);
     }
   }
 
@@ -249,13 +353,25 @@ export function ManagementView({
         episodeNumber: num,
         title: epTitle.trim(),
         synopsis: epSynopsis.trim(),
-        introStart: parseTimecodeToSeconds(epIntroStart),
-        introEnd: parseTimecodeToSeconds(epIntroEnd),
-        outroStart: parseTimecodeToSeconds(epOutroStart),
-        outroEnd: parseTimecodeToSeconds(epOutroEnd),
+        introStart: epIntroStart.trim()
+          ? parseTimecodeToSeconds(epIntroStart)
+          : null,
+        introEnd: epIntroEnd.trim()
+          ? parseTimecodeToSeconds(epIntroEnd)
+          : null,
+        outroStart: epOutroStart.trim()
+          ? parseTimecodeToSeconds(epOutroStart)
+          : null,
+        outroEnd: epOutroEnd.trim()
+          ? parseTimecodeToSeconds(epOutroEnd)
+          : null,
       });
       setEpTitle('');
       setEpSynopsis('');
+      setEpIntroStart('');
+      setEpIntroEnd('');
+      setEpOutroStart('');
+      setEpOutroEnd('');
       setUploadEpId(String(id));
       await loadSelectedDetail(selectedAnimeId);
       await onRefreshAll();
@@ -266,6 +382,57 @@ export function ManagementView({
       setErrorMessage(
         err instanceof Error ? err.message : 'Błąd tworzenia odcinka.'
       );
+    }
+  }
+
+  function openIntroEditor(ep: Episode) {
+    clearFeedback();
+    setEditingIntroEpId(ep.id);
+    setEditIntroStart(
+      ep.introStart !== null ? formatTimecode(ep.introStart) : ''
+    );
+    setEditIntroEnd(ep.introEnd !== null ? formatTimecode(ep.introEnd) : '');
+    setEditOutroStart(
+      ep.outroStart !== null ? formatTimecode(ep.outroStart) : ''
+    );
+    setEditOutroEnd(ep.outroEnd !== null ? formatTimecode(ep.outroEnd) : '');
+  }
+
+  async function handleSaveIntroOutro(ep: Episode) {
+    clearFeedback();
+    setSavingIntroEp(true);
+    try {
+      await api.updateEpisode(ep.id, {
+        title: ep.title,
+        synopsis: ep.synopsis,
+        introStart: editIntroStart.trim()
+          ? parseTimecodeToSeconds(editIntroStart)
+          : null,
+        introEnd: editIntroEnd.trim()
+          ? parseTimecodeToSeconds(editIntroEnd)
+          : null,
+        outroStart: editOutroStart.trim()
+          ? parseTimecodeToSeconds(editOutroStart)
+          : null,
+        outroEnd: editOutroEnd.trim()
+          ? parseTimecodeToSeconds(editOutroEnd)
+          : null,
+      });
+      setEditingIntroEpId(null);
+      if (selectedAnimeId) {
+        await loadSelectedDetail(selectedAnimeId);
+      }
+      setStatusMessage(
+        `Zapisano znaczniki Intro i Ending dla odcinka #${ep.episodeNumber}.`
+      );
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'Nie udało się zapisać znaczników Intro/Ending.'
+      );
+    } finally {
+      setSavingIntroEp(false);
     }
   }
 
@@ -299,8 +466,12 @@ export function ManagementView({
 
       setUploading(true);
       try {
-        const parsedDur =
-          parseTimecodeToSeconds(externalDurationInput) ?? 0;
+        const shouldProbe =
+          externalPlatform === 'gdrive' || gdriveMode === 'direct';
+        const detectedDuration = shouldProbe
+          ? await probeVideoDuration(submittedUrl, 5500)
+          : 0;
+
         const res = await api.addExternalVariant(targetEpId, {
           audioDub: uploadDub,
           subtitleMode: uploadSub,
@@ -308,13 +479,17 @@ export function ManagementView({
           externalPlatform,
           gdriveMode,
           maxQuality: externalMaxQuality,
-          durationSeconds: parsedDur,
+          durationSeconds: detectedDuration,
         });
         setExternalUrl('');
         if (selectedAnimeId) {
           await loadSelectedDetail(selectedAnimeId);
         }
         await onRefreshAll();
+        const durNote =
+          detectedDuration > 0
+            ? ` · wykryto czas: ${formatTimecode(detectedDuration)}`
+            : ' · długość zostanie wykryta automatycznie przy odtwarzaniu';
         setStatusMessage(
           `Podpięto zewnętrzne źródło (${
             externalPlatform === 'gdrive'
@@ -324,7 +499,7 @@ export function ManagementView({
                 : res.provider === 'gdrive_direct'
                   ? 'Google Drive strumień'
                   : 'Bezpośredni link wideo'
-          }).`
+          }${durNote}).`
         );
       } catch (err) {
         setErrorMessage(
@@ -721,12 +896,178 @@ export function ManagementView({
                 )}
               </div>
 
+              {/* Optional Google Drive Folder Bulk Episode Import */}
+              <div className="p-3.5 bg-[#09090B] border border-[#67E8F9]/25 rounded-xl space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <label
+                    htmlFor="anime-drive-folder"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#67E8F9]"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Import folderu Google Drive (opcjonalnie)</span>
+                  </label>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    id="anime-drive-folder"
+                    type="text"
+                    value={newDriveFolderUrl}
+                    onChange={(e) => {
+                      setNewDriveFolderUrl(e.target.value);
+                      setFolderPreviewEpisodes([]);
+                    }}
+                    placeholder="https://drive.google.com/drive/folders/[ID]?usp=sharing"
+                    className="flex-1 min-w-0 px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-xs sm:text-sm text-[#F8F8FA] focus:outline-none focus:border-[#67E8F9]"
+                  />
+                  <button
+                    type="button"
+                    disabled={folderPreviewLoading || !newDriveFolderUrl.trim()}
+                    onClick={() => void handlePreviewDriveFolder()}
+                    className="px-3 py-2 bg-white/10 hover:bg-white/15 disabled:opacity-45 text-[#F8F8FA] text-xs font-semibold rounded-lg shrink-0 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {folderPreviewLoading && (
+                      <Loader2
+                        className="w-3.5 h-3.5 animate-spin"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span>Sprawdź folder</span>
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-[#8D92A0] leading-relaxed">
+                  Pliki w folderze nazwane np.{' '}
+                  <span className="font-mono text-[#CFFAFE]">
+                    &quot;1. Tytuł&quot;
+                  </span>
+                  ,{' '}
+                  <span className="font-mono text-[#CFFAFE]">
+                    &quot;2. Tytuł&quot;
+                  </span>{' '}
+                  zostaną automatycznie dodane jako osobne odcinki przez
+                  LuxSource. Długość wykryje się ze źródła, a Intro i Ending
+                  dodasz opcjonalnie po utworzeniu serii.
+                </p>
+
+                {newDriveFolderUrl.trim() &&
+                  !extractGoogleDriveFolderId(newDriveFolderUrl) && (
+                    <p className="text-[11px] text-amber-300">
+                      Podaj poprawny link do folderu Google Drive (np.
+                      .../drive/folders/[ID]).
+                    </p>
+                  )}
+
+                {newDriveFolderUrl.trim() && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                    <div>
+                      <label
+                        htmlFor="folder-dub"
+                        className="block text-[11px] text-[#A3A8B4] mb-1"
+                      >
+                        Dubbing odcinków
+                      </label>
+                      <select
+                        id="folder-dub"
+                        value={folderAudioDub}
+                        onChange={(e) =>
+                          setFolderAudioDub(e.target.value as AudioDub)
+                        }
+                        className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
+                      >
+                        <option value="jp">Japoński</option>
+                        <option value="en">Angielski</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="folder-sub"
+                        className="block text-[11px] text-[#A3A8B4] mb-1"
+                      >
+                        Napisy
+                      </label>
+                      <select
+                        id="folder-sub"
+                        value={folderSubtitleMode}
+                        onChange={(e) =>
+                          setFolderSubtitleMode(e.target.value as SubtitleMode)
+                        }
+                        className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
+                      >
+                        <option value="pl">Polskie</option>
+                        <option value="en">Angielskie</option>
+                        <option value="none">Bez napisów</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="folder-quality"
+                        className="block text-[11px] text-[#A3A8B4] mb-1"
+                      >
+                        Maks. jakość
+                      </label>
+                      <select
+                        id="folder-quality"
+                        value={folderMaxQuality}
+                        onChange={(e) =>
+                          setFolderMaxQuality(e.target.value as QualityTier)
+                        }
+                        className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
+                      >
+                        <option value="2k">2K (1440p)</option>
+                        <option value="1080p">1080p</option>
+                        <option value="720p">720p</option>
+                        <option value="480p">480p</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {folderPreviewEpisodes.length > 0 && (
+                  <div className="max-h-40 overflow-y-auto bg-[#111216] border border-white/10 rounded-lg p-2.5 space-y-1">
+                    <p className="text-[11px] font-semibold text-[#67E8F9] mb-1">
+                      Wykryto odcinki ({folderPreviewEpisodes.length}):
+                    </p>
+                    {folderPreviewEpisodes.map((item) => (
+                      <div
+                        key={item.fileId}
+                        className="flex items-center justify-between gap-2 text-[11px] text-[#E4E4EA]"
+                      >
+                        <span className="truncate">
+                          <span className="font-mono text-[#67E8F9] mr-1.5">
+                            #{item.episodeNumber}
+                          </span>
+                          {item.title}
+                        </span>
+                        <span className="text-[#8D92A0] font-mono shrink-0">
+                          LuxSource
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <button
                 type="submit"
-                className="w-full py-2.5 px-4 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] text-sm font-semibold rounded-lg inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                disabled={creatingAnime}
+                className="w-full py-2.5 px-4 bg-[#67E8F9] hover:bg-[#A5F3FC] disabled:opacity-60 text-[#070B10] text-sm font-semibold rounded-lg inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                <span>Dodaj anime do biblioteki</span>
+                {creatingAnime ? (
+                  <Loader2
+                    className="w-4 h-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Plus className="w-4 h-4" aria-hidden="true" />
+                )}
+                <span>
+                  {creatingAnime
+                    ? 'Dodawanie serii i import odcinków...'
+                    : newDriveFolderUrl.trim()
+                      ? 'Dodaj anime i zaimportuj odcinki'
+                      : 'Dodaj anime do biblioteki'}
+                </span>
               </button>
             </form>
           </section>
@@ -853,70 +1194,76 @@ export function ManagementView({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div>
-                      <label
-                        htmlFor="ep-intro-start"
-                        className="block text-xs text-[#A3A8B4] mb-1"
-                      >
-                        Opening od (MM:SS)
-                      </label>
-                      <input
-                        id="ep-intro-start"
-                        type="text"
-                        value={epIntroStart}
-                        onChange={(e) => setEpIntroStart(e.target.value)}
-                        placeholder="01:10"
-                        className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
-                      />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="ep-intro-end"
-                        className="block text-xs text-[#A3A8B4] mb-1"
-                      >
-                        Opening do (MM:SS)
-                      </label>
-                      <input
-                        id="ep-intro-end"
-                        type="text"
-                        value={epIntroEnd}
-                        onChange={(e) => setEpIntroEnd(e.target.value)}
-                        placeholder="02:40"
-                        className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
-                      />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="ep-outro-start"
-                        className="block text-xs text-[#A3A8B4] mb-1"
-                      >
-                        Ending od (MM:SS)
-                      </label>
-                      <input
-                        id="ep-outro-start"
-                        type="text"
-                        value={epOutroStart}
-                        onChange={(e) => setEpOutroStart(e.target.value)}
-                        placeholder="22:00"
-                        className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
-                      />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="ep-outro-end"
-                        className="block text-xs text-[#A3A8B4] mb-1"
-                      >
-                        Ending do (MM:SS)
-                      </label>
-                      <input
-                        id="ep-outro-end"
-                        type="text"
-                        value={epOutroEnd}
-                        onChange={(e) => setEpOutroEnd(e.target.value)}
-                        placeholder="23:30"
-                        className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
-                      />
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-[#8D92A0]">
+                      Opening i Ending są opcjonalne — możesz je wpisać teraz lub
+                      uzupełnić później po dodaniu odcinka.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <label
+                          htmlFor="ep-intro-start"
+                          className="block text-xs text-[#A3A8B4] mb-1"
+                        >
+                          Opening od (opc.)
+                        </label>
+                        <input
+                          id="ep-intro-start"
+                          type="text"
+                          value={epIntroStart}
+                          onChange={(e) => setEpIntroStart(e.target.value)}
+                          placeholder="np. 01:10"
+                          className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="ep-intro-end"
+                          className="block text-xs text-[#A3A8B4] mb-1"
+                        >
+                          Opening do (opc.)
+                        </label>
+                        <input
+                          id="ep-intro-end"
+                          type="text"
+                          value={epIntroEnd}
+                          onChange={(e) => setEpIntroEnd(e.target.value)}
+                          placeholder="np. 02:40"
+                          className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="ep-outro-start"
+                          className="block text-xs text-[#A3A8B4] mb-1"
+                        >
+                          Ending od (opc.)
+                        </label>
+                        <input
+                          id="ep-outro-start"
+                          type="text"
+                          value={epOutroStart}
+                          onChange={(e) => setEpOutroStart(e.target.value)}
+                          placeholder="np. 21:30"
+                          className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="ep-outro-end"
+                          className="block text-xs text-[#A3A8B4] mb-1"
+                        >
+                          Ending do (opc.)
+                        </label>
+                        <input
+                          id="ep-outro-end"
+                          type="text"
+                          value={epOutroEnd}
+                          onChange={(e) => setEpOutroEnd(e.target.value)}
+                          placeholder="np. 23:00"
+                          className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -1182,8 +1529,8 @@ export function ManagementView({
                       <div
                         className={`grid grid-cols-1 gap-3 ${
                           externalPlatform === 'other'
-                            ? 'sm:grid-cols-3'
-                            : 'sm:grid-cols-2'
+                            ? 'sm:grid-cols-2'
+                            : 'sm:grid-cols-1'
                         }`}
                       >
                         {externalPlatform === 'other' && (
@@ -1237,26 +1584,13 @@ export function ManagementView({
                             <option value="480p">480p SD</option>
                           </select>
                         </div>
-
-                        <div>
-                          <label
-                            htmlFor="external-duration"
-                            className="block text-xs text-[#A3A8B4] mb-1"
-                          >
-                            Długość odcinka (MM:SS)
-                          </label>
-                          <input
-                            id="external-duration"
-                            type="text"
-                            value={externalDurationInput}
-                            onChange={(e) =>
-                              setExternalDurationInput(e.target.value)
-                            }
-                            placeholder="24:00"
-                            className="w-full px-3 py-2.5 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
-                          />
-                        </div>
                       </div>
+
+                      <p className="text-[11px] text-[#8D92A0]">
+                        Długość odcinka wykrywana jest automatycznie z podanego
+                        źródła (bez potrzeby wpisywania). Gdy różne wersje mają
+                        inną długość, wybierana jest najdłuższa.
+                      </p>
 
                       <button
                         type="submit"
@@ -1266,7 +1600,7 @@ export function ManagementView({
                         <Link2 className="w-4 h-4" aria-hidden="true" />
                         <span>
                           {uploading
-                            ? 'Zapisywanie źródła...'
+                            ? 'Wykrywanie czasu i zapisywanie...'
                             : 'Podepnij zewnętrzne źródło'}
                         </span>
                       </button>
@@ -1287,14 +1621,18 @@ export function ManagementView({
                         key={ep.id}
                         className="p-4 bg-[#09090B] border border-white/10 rounded-xl space-y-2.5"
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold text-[#F8F8FA]">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-[#F8F8FA] min-w-0">
                             <span className="font-mono text-[#67E8F9] mr-2">
                               #{ep.episodeNumber}
                             </span>
                             {ep.title}
-                            <span className="ml-3 text-xs font-mono text-[#A3A8B4] tabular-nums">
-                              OP:{' '}
+                            <span className="block sm:inline sm:ml-3 mt-1 sm:mt-0 text-xs font-mono text-[#A3A8B4] tabular-nums">
+                              Czas:{' '}
+                              {ep.durationSeconds > 0
+                                ? formatTimecode(ep.durationSeconds)
+                                : 'auto'}{' '}
+                              · OP:{' '}
                               {ep.introStart !== null
                                 ? formatTimecode(ep.introStart)
                                 : '—'}
@@ -1312,15 +1650,136 @@ export function ManagementView({
                                 : '—'}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteEpisode(ep.id)}
-                            aria-label={`Usuń odcinek ${ep.episodeNumber}`}
-                            className="text-xs text-red-300 hover:text-red-200 cursor-pointer"
-                          >
-                            Usuń odcinek
-                          </button>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                editingIntroEpId === ep.id
+                                  ? setEditingIntroEpId(null)
+                                  : openIntroEditor(ep)
+                              }
+                              aria-label={`Edytuj Intro i Ending dla odcinka ${ep.episodeNumber}`}
+                              className="text-xs text-[#67E8F9] hover:text-[#CFFAFE] inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
+                              <span>Edytuj Intro / Ending</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteEpisode(ep.id)}
+                              aria-label={`Usuń odcinek ${ep.episodeNumber}`}
+                              className="text-xs text-red-300 hover:text-red-200 cursor-pointer"
+                            >
+                              Usuń odcinek
+                            </button>
+                          </div>
                         </div>
+
+                        {editingIntroEpId === ep.id && (
+                          <div className="p-3 bg-[#111216] border border-[#67E8F9]/30 rounded-lg space-y-3">
+                            <p className="text-[11px] font-semibold text-[#67E8F9]">
+                              Ustaw znaczniki Intro i Ending (MM:SS — zostaw
+                              puste aby wyłączyć)
+                            </p>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                              <div>
+                                <label
+                                  htmlFor={`edit-intro-start-${ep.id}`}
+                                  className="block text-[11px] text-[#A3A8B4] mb-1"
+                                >
+                                  Opening od
+                                </label>
+                                <input
+                                  id={`edit-intro-start-${ep.id}`}
+                                  type="text"
+                                  value={editIntroStart}
+                                  onChange={(e) =>
+                                    setEditIntroStart(e.target.value)
+                                  }
+                                  placeholder="00:00"
+                                  className="w-full px-2.5 py-1.5 bg-[#09090B] border border-white/15 rounded-lg text-xs font-mono tabular-nums text-[#F8F8FA]"
+                                />
+                              </div>
+                              <div>
+                                <label
+                                  htmlFor={`edit-intro-end-${ep.id}`}
+                                  className="block text-[11px] text-[#A3A8B4] mb-1"
+                                >
+                                  Opening do
+                                </label>
+                                <input
+                                  id={`edit-intro-end-${ep.id}`}
+                                  type="text"
+                                  value={editIntroEnd}
+                                  onChange={(e) =>
+                                    setEditIntroEnd(e.target.value)
+                                  }
+                                  placeholder="01:30"
+                                  className="w-full px-2.5 py-1.5 bg-[#09090B] border border-white/15 rounded-lg text-xs font-mono tabular-nums text-[#F8F8FA]"
+                                />
+                              </div>
+                              <div>
+                                <label
+                                  htmlFor={`edit-outro-start-${ep.id}`}
+                                  className="block text-[11px] text-[#A3A8B4] mb-1"
+                                >
+                                  Ending od
+                                </label>
+                                <input
+                                  id={`edit-outro-start-${ep.id}`}
+                                  type="text"
+                                  value={editOutroStart}
+                                  onChange={(e) =>
+                                    setEditOutroStart(e.target.value)
+                                  }
+                                  placeholder="22:00"
+                                  className="w-full px-2.5 py-1.5 bg-[#09090B] border border-white/15 rounded-lg text-xs font-mono tabular-nums text-[#F8F8FA]"
+                                />
+                              </div>
+                              <div>
+                                <label
+                                  htmlFor={`edit-outro-end-${ep.id}`}
+                                  className="block text-[11px] text-[#A3A8B4] mb-1"
+                                >
+                                  Ending do
+                                </label>
+                                <input
+                                  id={`edit-outro-end-${ep.id}`}
+                                  type="text"
+                                  value={editOutroEnd}
+                                  onChange={(e) =>
+                                    setEditOutroEnd(e.target.value)
+                                  }
+                                  placeholder="23:30"
+                                  className="w-full px-2.5 py-1.5 bg-[#09090B] border border-white/15 rounded-lg text-xs font-mono tabular-nums text-[#F8F8FA]"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={savingIntroEp}
+                                onClick={() => void handleSaveIntroOutro(ep)}
+                                className="px-3 py-1.5 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] text-xs font-semibold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Check
+                                  className="w-3.5 h-3.5"
+                                  aria-hidden="true"
+                                />
+                                <span>
+                                  {savingIntroEp ? 'Zapisywanie...' : 'Zapisz'}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingIntroEpId(null)}
+                                className="px-3 py-1.5 bg-white/10 text-[#F8F8FA] text-xs rounded-lg cursor-pointer"
+                              >
+                                Anuluj
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {ep.variants.length === 0 ? (
                           <p className="text-xs text-[#737887]">

@@ -52,7 +52,13 @@ import {
 import {
   calculateTotalWatchSeconds,
   parseExternalVideoSource,
+  resolveMaxEpisodeDuration,
 } from './src/utils/playerLogic.ts';
+import {
+  extractGoogleDriveFolderId,
+  parseGoogleDriveFolderHtml,
+} from './src/utils/driveFolderParser.ts';
+import type { ParsedFolderEpisode } from './src/utils/driveFolderParser.ts';
 import type {
   AnimeDetail,
   AnimeRelation,
@@ -748,10 +754,161 @@ app.get(
   }
 );
 
+function qualityTierSpecs(maxQuality: unknown): {
+  availQualities: QualityTier[];
+  sourceWidth: number;
+  sourceHeight: number;
+} {
+  if (maxQuality === '2k') {
+    return {
+      availQualities: ['2k', '1080p', '720p', '480p'],
+      sourceWidth: 2560,
+      sourceHeight: 1440,
+    };
+  }
+  if (maxQuality === '720p') {
+    return {
+      availQualities: ['720p', '480p'],
+      sourceWidth: 1280,
+      sourceHeight: 720,
+    };
+  }
+  if (maxQuality === '480p') {
+    return {
+      availQualities: ['480p'],
+      sourceWidth: 854,
+      sourceHeight: 480,
+    };
+  }
+  return {
+    availQualities: ['1080p', '720p', '480p'],
+    sourceWidth: 1920,
+    sourceHeight: 1080,
+  };
+}
+
+function recomputeEpisodeMaxDuration(episodeId: number): number {
+  const variantRows = db
+    .prepare(
+      'SELECT duration_seconds FROM episode_variants WHERE episode_id = ?'
+    )
+    .all(episodeId) as Array<{ duration_seconds: number | null }>;
+
+  const epRow = db
+    .prepare('SELECT duration_seconds FROM episodes WHERE id = ?')
+    .get(episodeId) as { duration_seconds: number | null } | undefined;
+
+  const maxVariantDuration = resolveMaxEpisodeDuration(
+    variantRows.map((v) => v.duration_seconds)
+  );
+
+  const nextDuration =
+    variantRows.length === 0
+      ? 0
+      : maxVariantDuration > 0
+        ? maxVariantDuration
+        : Number(epRow?.duration_seconds || 0);
+
+  db.prepare('UPDATE episodes SET duration_seconds = ? WHERE id = ?').run(
+    nextDuration,
+    episodeId
+  );
+  return nextDuration;
+}
+
+async function fetchGoogleDriveFolderEpisodes(folderInput: string): Promise<{
+  folderId: string;
+  episodes: ParsedFolderEpisode[];
+}> {
+  const folderId = extractGoogleDriveFolderId(folderInput);
+  if (!folderId) {
+    throw new Error(
+      'Nieprawidłowy link do folderu Google Drive. Wklej link w formacie https://drive.google.com/drive/folders/[ID]?usp=sharing'
+    );
+  }
+
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'Accept-Language': 'pl,en-US;q=0.9,en;q=0.8',
+  };
+
+  let sawAuthWall = false;
+  const candidateUrls = [
+    `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(folderId)}#list`,
+    `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}?usp=sharing`,
+  ];
+
+  for (const targetUrl of candidateUrls) {
+    try {
+      const resp = await fetch(targetUrl, {
+        headers,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (resp.url.includes('accounts.google.com')) {
+        sawAuthWall = true;
+        continue;
+      }
+      if (!resp.ok) {
+        continue;
+      }
+      const html = await resp.text();
+      if (
+        html.includes('accounts.google.com/ServiceLogin') ||
+        html.includes('You need access') ||
+        html.includes('Poproś o dostęp')
+      ) {
+        sawAuthWall = true;
+      }
+      const episodes = parseGoogleDriveFolderHtml(html);
+      if (episodes.length > 0) {
+        return { folderId, episodes };
+      }
+    } catch {
+      // try next candidate endpoint
+    }
+  }
+
+  if (sawAuthWall) {
+    throw new Error(
+      'Brak publicznego dostępu do folderu Google Drive. Ustaw widoczność folderu na „Każdy mający link (Przeglądający)”.'
+    );
+  }
+
+  throw new Error(
+    'Nie znaleziono w folderze plików wideo ponumerowanych jako "1. [tytuł]", "2. [tytuł]" itd. Sprawdź nazwy plików i udostępnianie folderu.'
+  );
+}
+
+app.post(
+  '/api/drive-folder/preview',
+  requireAdminOrOwner,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const folderUrl = sanitizeText(req.body?.folderUrl, 1000);
+    if (!folderUrl) {
+      res.status(400).json({ error: 'Podaj link do folderu Google Drive.' });
+      return;
+    }
+
+    try {
+      const result = await fetchGoogleDriveFolderEpisodes(folderUrl);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Nie udało się odczytać folderu Google Drive.',
+      });
+    }
+  }
+);
+
 app.post(
   '/api/anime',
   requireAdminOrOwner,
-  (req: AuthenticatedRequest, res: Response) => {
+  async (req: AuthenticatedRequest, res: Response) => {
     const title = sanitizeText(req.body?.title, 160);
     const originalTitle = sanitizeText(req.body?.originalTitle, 160);
     const synopsis = sanitizeText(req.body?.synopsis, 2000);
@@ -765,10 +922,38 @@ app.post(
           .filter((g: number | null): g is number => g !== null)
       : [];
 
+    const driveFolderUrl = sanitizeText(req.body?.driveFolderUrl, 1000);
+    const folderAudioDub: AudioDub = isValidAudioDub(req.body?.folderAudioDub)
+      ? req.body.folderAudioDub
+      : 'jp';
+    const folderSubtitleMode: SubtitleMode = isValidSubtitleMode(
+      req.body?.folderSubtitleMode
+    )
+      ? req.body.folderSubtitleMode
+      : 'pl';
+    const qualitySpec = qualityTierSpecs(req.body?.folderMaxQuality);
+
     if (title.length < 1) {
       res.status(400).json({ error: 'Podaj tytuł anime.' });
       return;
     }
+
+    let folderEpisodes: ParsedFolderEpisode[] = [];
+    if (driveFolderUrl) {
+      try {
+        const fetched = await fetchGoogleDriveFolderEpisodes(driveFolderUrl);
+        folderEpisodes = fetched.episodes;
+      } catch (err) {
+        res.status(400).json({
+          error:
+            err instanceof Error
+              ? err.message
+              : 'Nie udało się zaimportować folderu Google Drive.',
+        });
+        return;
+      }
+    }
+
     const validStatus =
       status === 'Zakończone' || status === 'Emitowane' || status === 'Planowane'
         ? status
@@ -776,31 +961,93 @@ app.post(
 
     const safeCover = coverPath ? path.basename(coverPath) : '';
 
-    const result = db
-      .prepare(
-        `INSERT INTO anime (title, original_title, synopsis, release_year, studio, status, cover_path, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        title,
-        originalTitle,
-        synopsis,
-        releaseYear,
-        studio,
-        validStatus,
-        safeCover,
-        req.authUser!.id
-      );
+    const importedEpisodes: Array<{
+      episodeId: number;
+      variantId: number;
+      episodeNumber: number;
+      title: string;
+      externalUrl: string;
+    }> = [];
 
-    const animeId = Number(result.lastInsertRowid);
-    const insertGenre = db.prepare(
-      'INSERT OR IGNORE INTO anime_genres (anime_id, genre_id) VALUES (?, ?)'
-    );
-    for (const gid of genreIds) {
-      insertGenre.run(animeId, gid);
+    let animeId = 0;
+    db.exec('BEGIN');
+    try {
+      const result = db
+        .prepare(
+          `INSERT INTO anime (title, original_title, synopsis, release_year, studio, status, cover_path, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          title,
+          originalTitle,
+          synopsis,
+          releaseYear,
+          studio,
+          validStatus,
+          safeCover,
+          req.authUser!.id
+        );
+
+      animeId = Number(result.lastInsertRowid);
+      const insertGenre = db.prepare(
+        'INSERT OR IGNORE INTO anime_genres (anime_id, genre_id) VALUES (?, ?)'
+      );
+      for (const gid of genreIds) {
+        insertGenre.run(animeId, gid);
+      }
+
+      const insertEpisode = db.prepare(
+        `INSERT INTO episodes (anime_id, episode_number, title, synopsis, duration_seconds, intro_start, intro_end, outro_start, outro_end)
+         VALUES (?, ?, ?, '', 0, NULL, NULL, NULL, NULL)`
+      );
+      const insertVariant = db.prepare(
+        `INSERT INTO episode_variants (
+           episode_id, audio_dub, subtitle_mode, source_type, external_url, external_provider,
+           file_path, file_size_bytes, source_width, source_height, duration_seconds,
+           available_qualities_json, transcoded_paths_json, transcode_status
+         ) VALUES (?, ?, ?, 'external', ?, 'gdrive_direct', '', 0, ?, ?, 0, ?, '{}', 'ready')`
+      );
+      const availJson = JSON.stringify(qualitySpec.availQualities);
+
+      for (const ep of folderEpisodes) {
+        const epTitle = sanitizeText(ep.title, 160) || `Odcinek ${ep.episodeNumber}`;
+        const epRes = insertEpisode.run(animeId, ep.episodeNumber, epTitle);
+        const episodeId = Number(epRes.lastInsertRowid);
+        const varRes = insertVariant.run(
+          episodeId,
+          folderAudioDub,
+          folderSubtitleMode,
+          ep.luxSourceUrl,
+          qualitySpec.sourceWidth,
+          qualitySpec.sourceHeight,
+          availJson
+        );
+        importedEpisodes.push({
+          episodeId,
+          variantId: Number(varRes.lastInsertRowid),
+          episodeNumber: ep.episodeNumber,
+          title: epTitle,
+          externalUrl: ep.luxSourceUrl,
+        });
+      }
+
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      res.status(500).json({
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Błąd zapisu serii anime do bazy danych.',
+      });
+      return;
     }
 
-    res.status(201).json({ id: animeId });
+    res.status(201).json({
+      id: animeId,
+      importedEpisodesCount: importedEpisodes.length,
+      importedEpisodes,
+    });
   }
 );
 
@@ -1118,14 +1365,20 @@ app.delete(
     }
     const v = db
       .prepare(
-        'SELECT source_type, file_path, transcoded_paths_json FROM episode_variants WHERE id = ?'
+        'SELECT episode_id, source_type, file_path, transcoded_paths_json FROM episode_variants WHERE id = ?'
       )
       .get(variantId) as
-      | { source_type: string; file_path: string; transcoded_paths_json: string }
+      | {
+          episode_id: number;
+          source_type: string;
+          file_path: string;
+          transcoded_paths_json: string;
+        }
       | undefined;
 
     if (v) {
       db.prepare('DELETE FROM episode_variants WHERE id = ?').run(variantId);
+      recomputeEpisodeMaxDuration(v.episode_id);
       if (v.source_type !== 'external' && v.file_path) {
         const orig = resolveSafeStoragePath(VIDEOS_DIR, v.file_path);
         if (orig && fs.existsSync(orig)) {
@@ -1142,6 +1395,52 @@ app.delete(
 );
 
 app.post(
+  '/api/variants/:id/duration',
+  requireAuth,
+  (req: AuthenticatedRequest, res: Response) => {
+    const variantId = parsePositiveInt(req.params.id);
+    const durationSeconds = parsePositiveInt(req.body?.durationSeconds);
+    if (!variantId || !durationSeconds || durationSeconds > 43_200) {
+      res.status(400).json({ error: 'Nieprawidłowy czas trwania źródła.' });
+      return;
+    }
+
+    const variant = db
+      .prepare(
+        'SELECT id, episode_id, duration_seconds FROM episode_variants WHERE id = ?'
+      )
+      .get(variantId) as
+      | { id: number; episode_id: number; duration_seconds: number | null }
+      | undefined;
+    if (!variant) {
+      res.status(404).json({ error: 'Wariant wideo nie istnieje.' });
+      return;
+    }
+
+    const currentVarDur = Number(variant.duration_seconds || 0);
+    if (
+      canManageContent(req.authUser!.role) ||
+      currentVarDur === 0 ||
+      durationSeconds > currentVarDur
+    ) {
+      db.prepare(
+        'UPDATE episode_variants SET duration_seconds = ? WHERE id = ?'
+      ).run(durationSeconds, variantId);
+    }
+
+    const episodeDurationSeconds = recomputeEpisodeMaxDuration(
+      variant.episode_id
+    );
+
+    res.json({
+      ok: true,
+      variantDurationSeconds: durationSeconds,
+      episodeDurationSeconds,
+    });
+  }
+);
+
+app.post(
   '/api/episodes/:id/external-variant',
   requireAdminOrOwner,
   (req: AuthenticatedRequest, res: Response) => {
@@ -1152,8 +1451,9 @@ app.post(
     const externalPlatform =
       req.body?.externalPlatform === 'other' ? 'other' : 'gdrive';
     const gdriveMode = req.body?.gdriveMode === 'direct' ? 'direct' : 'preview';
-    const durationSeconds =
+    const rawDuration =
       parseNonNegativeIntOrNull(req.body?.durationSeconds) ?? 0;
+    const durationSeconds = rawDuration <= 43_200 ? rawDuration : 0;
     const maxQuality = req.body?.maxQuality;
 
     if (
@@ -1185,22 +1485,8 @@ app.post(
       return;
     }
 
-    let availQualities: QualityTier[] = ['1080p', '720p', '480p'];
-    let sourceHeight = 1080;
-    let sourceWidth = 1920;
-    if (maxQuality === '2k') {
-      availQualities = ['2k', '1080p', '720p', '480p'];
-      sourceHeight = 1440;
-      sourceWidth = 2560;
-    } else if (maxQuality === '720p') {
-      availQualities = ['720p', '480p'];
-      sourceHeight = 720;
-      sourceWidth = 1280;
-    } else if (maxQuality === '480p') {
-      availQualities = ['480p'];
-      sourceHeight = 480;
-      sourceWidth = 854;
-    }
+    const { availQualities, sourceWidth, sourceHeight } =
+      qualityTierSpecs(maxQuality);
 
     const existing = db
       .prepare(
@@ -1234,7 +1520,7 @@ app.post(
         parsed.provider,
         sourceWidth,
         sourceHeight,
-        durationSeconds || ep.duration_seconds || 0,
+        durationSeconds,
         JSON.stringify(availQualities),
         existing.id
       );
@@ -1256,24 +1542,20 @@ app.post(
           parsed.provider,
           sourceWidth,
           sourceHeight,
-          durationSeconds || ep.duration_seconds || 0,
+          durationSeconds,
           JSON.stringify(availQualities)
         );
       variantId = Number(inserted.lastInsertRowid);
     }
 
-    if (durationSeconds > 0 && (!ep.duration_seconds || ep.duration_seconds === 0)) {
-      db.prepare('UPDATE episodes SET duration_seconds = ? WHERE id = ?').run(
-        durationSeconds,
-        episodeId
-      );
-    }
+    const episodeDurationSeconds = recomputeEpisodeMaxDuration(episodeId);
 
     res.status(201).json({
       variantId,
       provider: parsed.provider,
       externalUrl: parsed.normalizedUrl,
       availableQualities: availQualities,
+      episodeDurationSeconds,
     });
   }
 );
@@ -1434,10 +1716,8 @@ app.post(
       variantId = Number(inserted.lastInsertRowid);
     }
 
-    // Update episode duration if not yet set
-    db.prepare(
-      'UPDATE episodes SET duration_seconds = ? WHERE id = ? AND (duration_seconds IS NULL OR duration_seconds = 0)'
-    ).run(probe.durationSeconds, session.episodeId);
+    // Keep episode duration aligned with the longest available variant
+    recomputeEpisodeMaxDuration(session.episodeId);
 
     enqueueVariantTranscodes({
       variantId,

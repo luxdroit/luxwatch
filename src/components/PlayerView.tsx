@@ -105,6 +105,7 @@ export function PlayerView({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const resumeSeekRef = useRef<number | null>(null);
   const lastSavedRef = useRef<number>(0);
+  const reportedDurationVariantsRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     setSelectedVariantId(initialSelection.variant?.id ?? null);
@@ -200,6 +201,19 @@ export function PlayerView({
     if (!vid) return;
     if (Number.isFinite(vid.duration) && vid.duration > 0) {
       setDuration(vid.duration);
+      const rounded = Math.round(vid.duration);
+      if (
+        activeVariant &&
+        rounded > 0 &&
+        !reportedDurationVariantsRef.current.has(activeVariant.id) &&
+        (activeVariant.durationSeconds === 0 ||
+          Math.abs(rounded - activeVariant.durationSeconds) > 2)
+      ) {
+        reportedDurationVariantsRef.current.add(activeVariant.id);
+        void api
+          .reportVariantDuration(activeVariant.id, rounded)
+          .catch(() => {});
+      }
     }
     if (resumeSeekRef.current !== null && resumeSeekRef.current > 0) {
       vid.currentTime = Math.min(

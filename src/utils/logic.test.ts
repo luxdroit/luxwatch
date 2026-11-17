@@ -14,10 +14,16 @@ import {
   parseExternalVideoSource,
   parseTimecodeToSeconds,
   resolveBestQuality,
+  resolveMaxEpisodeDuration,
   resolveStageTapZone,
   selectBestVariant,
   shouldIgnorePlayerShortcut,
 } from './playerLogic.ts';
+import {
+  extractGoogleDriveFolderId,
+  parseEpisodeFilename,
+  parseGoogleDriveFolderHtml,
+} from './driveFolderParser.ts';
 import {
   canCreateUserWithRole,
   canDeleteUser,
@@ -292,6 +298,106 @@ test('Continue Watching helper strictly limits items to maximum 5', () => {
   const items = [1, 2, 3, 4, 5, 6, 7, 8];
   assert.deepEqual(limitContinueWatching(items), [1, 2, 3, 4, 5]);
 });
+
+test('Google Drive folder ID extractor handles folder URLs and rejects file URLs', () => {
+  assert.equal(
+    extractGoogleDriveFolderId(
+      'https://drive.google.com/drive/folders/1FolderAbCdEfGhIjKlMnOpQr?usp=sharing'
+    ),
+    '1FolderAbCdEfGhIjKlMnOpQr'
+  );
+  assert.equal(
+    extractGoogleDriveFolderId(
+      'https://drive.google.com/drive/u/0/folders/1FolderAbCdEfGhIjKlMnOpQr'
+    ),
+    '1FolderAbCdEfGhIjKlMnOpQr'
+  );
+  assert.equal(
+    extractGoogleDriveFolderId(
+      'https://drive.google.com/embeddedfolderview?id=1FolderAbCdEfGhIjKlMnOpQr#list'
+    ),
+    '1FolderAbCdEfGhIjKlMnOpQr'
+  );
+  assert.equal(
+    extractGoogleDriveFolderId(
+      'https://drive.google.com/file/d/1FileAbCdEfGhIjKlMnOpQrSt/view?usp=sharing'
+    ),
+    null
+  );
+});
+
+test('parseEpisodeFilename extracts numbered video titles and ignores subtitles/junk', () => {
+  assert.deepEqual(parseEpisodeFilename('1. Przebudzenie.mp4'), {
+    episodeNumber: 1,
+    title: 'Przebudzenie',
+  });
+  assert.deepEqual(parseEpisodeFilename('02. Nocny Patrol (1080p).mkv'), {
+    episodeNumber: 2,
+    title: 'Nocny Patrol (1080p)',
+  });
+  assert.equal(parseEpisodeFilename('1. Napisy.srt'), null);
+  assert.equal(parseEpisodeFilename('okladka.jpg'), null);
+  assert.equal(parseEpisodeFilename('Opening.mp4'), null);
+});
+
+test('parseGoogleDriveFolderHtml extracts numbered videos from embeddedfolderview and JSON payloads sorted numerically', () => {
+  const embeddedHtml = `
+    <div class="flip-entry" id="entry-1EpTenAbCdEfGhIjKlMnOp">
+      <div class="flip-entry-title">10. Dziesiąty Epizod.mp4</div>
+    </div>
+    <div class="flip-entry" id="entry-1EpTwoAbCdEfGhIjKlMnOp">
+      <div class="flip-entry-title">2. Drugi Odcinek.mkv</div>
+    </div>
+    <div class="flip-entry" id="entry-1SubTwoAbCdEfGhIjKlMnO">
+      <div class="flip-entry-title">2. Napisy.ass</div>
+    </div>
+    <div class="flip-entry" id="entry-1EpOneAbCdEfGhIjKlMnOp">
+      <div class="flip-entry-title">1. Początek &amp; Finał.mp4</div>
+    </div>
+    <div class="flip-entry" id="entry-1ExtraAbCdEfGhIjKlMnOp">
+      <div class="flip-entry-title">Opening Creditless.mp4</div>
+    </div>
+  `;
+
+  const parsed = parseGoogleDriveFolderHtml(embeddedHtml);
+  assert.equal(parsed.length, 3);
+  assert.deepEqual(
+    parsed.map((p) => ({
+      n: p.episodeNumber,
+      t: p.title,
+      url: p.luxSourceUrl,
+    })),
+    [
+      {
+        n: 1,
+        t: 'Początek & Finał',
+        url: 'https://luxsource.luxdroit.workers.dev/?id=1EpOneAbCdEfGhIjKlMnOp',
+      },
+      {
+        n: 2,
+        t: 'Drugi Odcinek',
+        url: 'https://luxsource.luxdroit.workers.dev/?id=1EpTwoAbCdEfGhIjKlMnOp',
+      },
+      {
+        n: 10,
+        t: 'Dziesiąty Epizod',
+        url: 'https://luxsource.luxdroit.workers.dev/?id=1EpTenAbCdEfGhIjKlMnOp',
+      },
+    ]
+  );
+
+  const jsonPayload = `window.data = [["1JsonEp1AbCdEfGhIjKlMnOpQr",["1Folder"],"1. JSON Start.mp4"],["1JsonEp2AbCdEfGhIjKlMnOpQr",null,"2. JSON Kontynuacja.webm"]];`;
+  const jsonParsed = parseGoogleDriveFolderHtml(jsonPayload);
+  assert.equal(jsonParsed.length, 2);
+  assert.equal(jsonParsed[0].title, 'JSON Start');
+  assert.equal(jsonParsed[1].episodeNumber, 2);
+});
+
+test('resolveMaxEpisodeDuration returns longest finite positive duration across variants', () => {
+  assert.equal(resolveMaxEpisodeDuration([1380, 1455, 0, 1412, null, undefined]), 1455);
+  assert.equal(resolveMaxEpisodeDuration([0, null, -5]), 0);
+});
+
 
 
 

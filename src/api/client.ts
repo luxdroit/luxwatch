@@ -164,6 +164,21 @@ export const api = {
   getAnimeDetail: (id: number) =>
     apiRequest<{ anime: AnimeDetail }>(`/api/anime/${id}`),
 
+  previewDriveFolder: (folderUrl: string) =>
+    apiRequest<{
+      folderId: string;
+      episodes: Array<{
+        fileId: string;
+        filename: string;
+        episodeNumber: number;
+        title: string;
+        luxSourceUrl: string;
+      }>;
+    }>('/api/drive-folder/preview', {
+      method: 'POST',
+      body: JSON.stringify({ folderUrl }),
+    }),
+
   createAnime: (data: {
     title: string;
     originalTitle: string;
@@ -173,8 +188,22 @@ export const api = {
     status: string;
     coverPath: string;
     genreIds: number[];
+    driveFolderUrl?: string;
+    folderAudioDub?: AudioDub;
+    folderSubtitleMode?: SubtitleMode;
+    folderMaxQuality?: QualityTier;
   }) =>
-    apiRequest<{ id: number }>('/api/anime', {
+    apiRequest<{
+      id: number;
+      importedEpisodesCount?: number;
+      importedEpisodes?: Array<{
+        episodeId: number;
+        variantId: number;
+        episodeNumber: number;
+        title: string;
+        externalUrl: string;
+      }>;
+    }>('/api/anime', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -258,6 +287,16 @@ export const api = {
       method: 'DELETE',
     }),
 
+  reportVariantDuration: (variantId: number, durationSeconds: number) =>
+    apiRequest<{
+      ok: boolean;
+      variantDurationSeconds: number;
+      episodeDurationSeconds: number;
+    }>(`/api/variants/${variantId}/duration`, {
+      method: 'POST',
+      body: JSON.stringify({ durationSeconds }),
+    }),
+
   addExternalVariant: (
     episodeId: number,
     data: {
@@ -275,6 +314,7 @@ export const api = {
       provider: string;
       externalUrl: string;
       availableQualities: QualityTier[];
+      episodeDurationSeconds?: number;
     }>(`/api/episodes/${episodeId}/external-variant`, {
       method: 'POST',
       body: JSON.stringify(data),
