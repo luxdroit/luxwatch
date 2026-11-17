@@ -143,7 +143,8 @@ export function PlayerView({
 
   const isExternalIframe =
     activeVariant?.sourceType === 'external' &&
-    activeVariant.externalProvider === 'gdrive_preview';
+    activeVariant.externalProvider === 'gdrive_preview' &&
+    !activeVariant.externalUrl.includes('luxsource.luxdroit.workers.dev');
 
   const streamUrl = activeVariant
     ? activeVariant.sourceType === 'external'

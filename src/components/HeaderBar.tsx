@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import type { UserAccount } from '../types';
 import { canManageContent } from '../utils/rbacLogic';
+import { PWAInstallButton } from './PWAInstallPrompt';
 
 export type AppView =
   | 'catalog'
@@ -105,8 +106,9 @@ export function HeaderBar({
             })}
           </nav>
 
-          {/* Zone 3: Single Primary Action */}
-          <div className="shrink-0">
+          {/* Zone 3: Actions */}
+          <div className="shrink-0 flex items-center gap-2">
+            <PWAInstallButton />
             <button
               type="button"
               onClick={onLogout}

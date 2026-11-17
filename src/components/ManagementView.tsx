@@ -119,8 +119,12 @@ export function ManagementView({
     try {
       const { anime } = await api.getAnimeDetail(id);
       setSelectedAnimeDetail(anime);
-      if (anime.episodes.length > 0 && !uploadEpId) {
-        setUploadEpId(String(anime.episodes[0].id));
+      if (anime.episodes.length > 0) {
+        if (!anime.episodes.some((ep) => String(ep.id) === uploadEpId)) {
+          setUploadEpId(String(anime.episodes[0].id));
+        }
+      } else {
+        setUploadEpId('');
       }
       const nextNum =
         anime.episodes.reduce(
@@ -281,6 +285,18 @@ export function ManagementView({
         );
         return;
       }
+      let submittedUrl = externalUrl.trim();
+      if (externalPlatform === 'gdrive') {
+        const extractedId = extractGoogleDriveFileId(submittedUrl);
+        if (!extractedId) {
+          setErrorMessage(
+            'Nie rozpoznano ID pliku Google Drive. Wklej link w formacie https://drive.google.com/file/d/[ID]/view?usp=sharing lub samo ID.'
+          );
+          return;
+        }
+        submittedUrl = buildLuxSourceDriveUrl(extractedId);
+      }
+
       setUploading(true);
       try {
         const parsedDur =
@@ -288,7 +304,7 @@ export function ManagementView({
         const res = await api.addExternalVariant(targetEpId, {
           audioDub: uploadDub,
           subtitleMode: uploadSub,
-          externalUrl: externalUrl.trim(),
+          externalUrl: submittedUrl,
           externalPlatform,
           gdriveMode,
           maxQuality: externalMaxQuality,
@@ -302,7 +318,7 @@ export function ManagementView({
         setStatusMessage(
           `Podpięto zewnętrzne źródło (${
             externalPlatform === 'gdrive'
-              ? 'Google Drive — LuxWatch Player'
+              ? `Google Drive -> ${res.externalUrl}`
               : res.provider === 'gdrive_preview'
                 ? 'Odtwarzacz Google Drive'
                 : res.provider === 'gdrive_direct'
@@ -1317,7 +1333,7 @@ export function ManagementView({
                                 key={v.id}
                                 className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#D4D6DE] bg-[#111216] px-3 py-2 rounded-lg border border-white/5"
                               >
-                                <span>
+                                <span className="min-w-0">
                                   {DUB_LABELS[v.audioDub]} ·{' '}
                                   {SUB_LABELS[v.subtitleMode]} ·{' '}
                                   <span className="font-mono text-[#A3A8B4]">
@@ -1325,10 +1341,10 @@ export function ManagementView({
                                       ? v.externalUrl.includes(
                                           'luxsource.luxdroit.workers.dev'
                                         )
-                                        ? 'Google Drive (LuxSource)'
+                                        ? `Google Drive (LuxSource) · ${v.externalUrl}`
                                         : v.externalProvider.startsWith('gdrive')
-                                          ? 'Google Drive'
-                                          : 'Link zewnętrzny'
+                                          ? `Google Drive · ${v.externalUrl}`
+                                          : `Link zewnętrzny · ${v.externalUrl}`
                                       : `${v.sourceWidth}×${v.sourceHeight} (${v.availableQualities.join('/')}) · ${formatBytes(v.fileSizeBytes)}`}
                                   </span>
                                 </span>

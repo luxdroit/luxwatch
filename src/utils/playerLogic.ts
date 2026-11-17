@@ -240,16 +240,25 @@ const GDRIVE_ID_RE = /^[a-zA-Z0-9_-]{10,120}$/;
 export const LUXSOURCE_WORKER_BASE = 'https://luxsource.luxdroit.workers.dev/';
 
 export function extractGoogleDriveFileId(input: string): string | null {
-  const trimmed = input.trim();
+  const trimmed = input.trim().replace(/^["']|["']$/g, '');
   if (!trimmed) return null;
 
   if (GDRIVE_ID_RE.test(trimmed) && !trimmed.includes('.')) {
     return trimmed;
   }
 
+  const candidateUrl =
+    /^https?:\/\//i.test(trimmed) || !trimmed.includes('.')
+      ? trimmed
+      : `https://${trimmed}`;
+
   try {
-    const url = new URL(trimmed);
+    const url = new URL(candidateUrl);
     const host = url.hostname.toLowerCase();
+    if (host === 'luxsource.luxdroit.workers.dev') {
+      const idParam = url.searchParams.get('id');
+      if (idParam && GDRIVE_ID_RE.test(idParam)) return idParam;
+    }
     if (
       host === 'drive.google.com' ||
       host === 'docs.google.com' ||
@@ -273,6 +282,16 @@ export function extractGoogleDriveFileId(input: string): string | null {
 
 export function buildLuxSourceDriveUrl(fileId: string): string {
   return `${LUXSOURCE_WORKER_BASE}?id=${encodeURIComponent(fileId)}`;
+}
+
+export const CONTINUE_WATCHING_LIMIT = 5;
+
+export function limitContinueWatching<T>(
+  items: readonly T[],
+  maxItems = CONTINUE_WATCHING_LIMIT
+): T[] {
+  if (!Array.isArray(items) || maxItems <= 0) return [];
+  return items.slice(0, maxItems);
 }
 
 export function parseExternalVideoSource(

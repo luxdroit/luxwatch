@@ -1736,7 +1736,7 @@ app.get(
          JOIN anime a ON a.id = e.anime_id
          WHERE wp.user_id = ? AND wp.position_seconds > 0 AND wp.completed = 0
          ORDER BY wp.updated_at DESC
-         LIMIT 12`
+         LIMIT 5`
       )
       .all(userId) as Array<Record<string, unknown>>;
 

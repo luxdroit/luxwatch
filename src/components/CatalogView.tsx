@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Check, Play, Search } from 'lucide-react';
 import type { AnimeSummary, ContinueWatchingItem, Genre } from '../types';
-import { formatTimecode } from '../utils/playerLogic';
+import {
+  CONTINUE_WATCHING_LIMIT,
+  formatTimecode,
+  limitContinueWatching,
+} from '../utils/playerLogic';
 import { CoverImage } from './CoverImage';
 
 interface CatalogViewProps {
@@ -55,19 +59,29 @@ export function CatalogView({
     });
   }, [animeList, searchQuery, selectedGenreId, selectedStatus, watchedFilter]);
 
+  const limitedContinue = useMemo(
+    () => limitContinueWatching(continueWatching, CONTINUE_WATCHING_LIMIT),
+    [continueWatching]
+  );
+
   if (onlyContinueTab) {
     return (
       <section className="max-w-7xl mx-auto px-3.5 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-8">
-        <div className="border-b border-white/10 pb-4 sm:pb-5">
-          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-[#F8F8FA]">
-            Kontynuuj oglądanie
-          </h1>
-          <p className="text-sm text-[#A3A8B4] mt-1.5">
-            Wznów odcinki dokładnie w miejscu, w którym przerwałeś.
-          </p>
+        <div className="border-b border-white/10 pb-4 sm:pb-5 flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-[#F8F8FA]">
+              Kontynuuj oglądanie
+            </h1>
+            <p className="text-sm text-[#A3A8B4] mt-1.5">
+              Wznów odcinki dokładnie w miejscu, w którym przerwałeś (limit {CONTINUE_WATCHING_LIMIT} pozycji).
+            </p>
+          </div>
+          <span className="text-xs font-mono text-[#67E8F9] tabular-nums">
+            {limitedContinue.length} / {CONTINUE_WATCHING_LIMIT}
+          </span>
         </div>
 
-        {continueWatching.length === 0 ? (
+        {limitedContinue.length === 0 ? (
           <div className="bg-[#111216] border border-white/10 rounded-xl p-8 sm:p-10 text-center">
             <p className="text-[#E4E4EA] font-medium mb-2">
               Brak rozpoczętych odcinków
@@ -78,7 +92,7 @@ export function CatalogView({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-            {continueWatching.map((item) => {
+            {limitedContinue.map((item) => {
               const pct = Math.min(
                 100,
                 Math.round(
@@ -215,7 +229,7 @@ export function CatalogView({
 
       <div className="max-w-7xl mx-auto px-3.5 sm:px-6 pt-6 sm:pt-10 space-y-8 sm:space-y-12">
         {/* Continue Watching Shelf */}
-        {continueWatching.length > 0 && (
+        {limitedContinue.length > 0 && (
           <section aria-labelledby="continue-heading" className="space-y-4">
             <div className="flex items-baseline justify-between">
               <h2
@@ -225,13 +239,12 @@ export function CatalogView({
                 Kontynuuj oglądanie
               </h2>
               <span className="text-xs text-[#A3A8B4] tabular-nums">
-                {continueWatching.length}{' '}
-                {continueWatching.length === 1 ? 'pozycja' : 'pozycje'}
+                {limitedContinue.length} / {CONTINUE_WATCHING_LIMIT}
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-              {continueWatching.slice(0, 6).map((item) => {
+              {limitedContinue.map((item) => {
                 const pct = Math.min(
                   100,
                   Math.round(

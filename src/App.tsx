@@ -8,6 +8,10 @@ import { LoginGate } from './components/LoginGate';
 import { ManagementView } from './components/ManagementView';
 import { PlayerView } from './components/PlayerView';
 import { ProfileView } from './components/ProfileView';
+import {
+  OfflineIndicator,
+  PWAInstallBanner,
+} from './components/PWAInstallPrompt';
 import type {
   AnimeDetail,
   AnimeSummary,
@@ -139,7 +143,13 @@ export default function App() {
   }
 
   if (!user) {
-    return <LoginGate onSuccess={(u) => void handleLoginSuccess(u)} />;
+    return (
+      <>
+        <LoginGate onSuccess={(u) => void handleLoginSuccess(u)} />
+        <PWAInstallBanner hasBottomNav={false} />
+        <OfflineIndicator />
+      </>
+    );
   }
 
   return (
@@ -211,6 +221,9 @@ export default function App() {
           />
         )}
       </main>
+
+      <PWAInstallBanner hasBottomNav={true} />
+      <OfflineIndicator />
     </div>
   );
 }

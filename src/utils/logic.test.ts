@@ -4,11 +4,13 @@ import {
   calculateTotalWatchSeconds,
   clampSeekTime,
   computeTimelineMarkers,
+  CONTINUE_WATCHING_LIMIT,
   extractGoogleDriveFileId,
   formatDurationHuman,
   formatTimecode,
   getAllowedQualitiesFromHeight,
   getSkipOverlayState,
+  limitContinueWatching,
   parseExternalVideoSource,
   parseTimecodeToSeconds,
   resolveBestQuality,
@@ -253,6 +255,27 @@ test('Google Drive worker mode extracts ID cleanly into luxsource worker URL and
     'https://luxsource.luxdroit.workers.dev/?id=1AbCDefGhIjKlMnOpQrStUvWxYz123456'
   );
 
+  const luxDirect = parseExternalVideoSource(
+    'https://luxsource.luxdroit.workers.dev/?id=1AbCDefGhIjKlMnOpQrStUvWxYz123456',
+    'gdrive_worker'
+  );
+  assert.equal(luxDirect.valid, true);
+  assert.equal(luxDirect.provider, 'gdrive_direct');
+  assert.equal(
+    luxDirect.normalizedUrl,
+    'https://luxsource.luxdroit.workers.dev/?id=1AbCDefGhIjKlMnOpQrStUvWxYz123456'
+  );
+
+  const schemeless = parseExternalVideoSource(
+    'drive.google.com/file/d/1AbCDefGhIjKlMnOpQrStUvWxYz123456/view?usp=sharing',
+    'gdrive_worker'
+  );
+  assert.equal(schemeless.valid, true);
+  assert.equal(
+    schemeless.normalizedUrl,
+    'https://luxsource.luxdroit.workers.dev/?id=1AbCDefGhIjKlMnOpQrStUvWxYz123456'
+  );
+
   const invalidWorkerRes = parseExternalVideoSource(
     'https://example.com/not-drive.mp4',
     'gdrive_worker'
@@ -262,6 +285,12 @@ test('Google Drive worker mode extracts ID cleanly into luxsource worker URL and
   assert.equal(resolveStageTapZone(0.15), 'left');
   assert.equal(resolveStageTapZone(0.5), 'center');
   assert.equal(resolveStageTapZone(0.85), 'right');
+});
+
+test('Continue Watching helper strictly limits items to maximum 5', () => {
+  assert.equal(CONTINUE_WATCHING_LIMIT, 5);
+  const items = [1, 2, 3, 4, 5, 6, 7, 8];
+  assert.deepEqual(limitContinueWatching(items), [1, 2, 3, 4, 5]);
 });
 
 

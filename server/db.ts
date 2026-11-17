@@ -10,6 +10,10 @@ import {
 import { enqueueVariantTranscodes, generateDemoClip } from './media.ts';
 import { hashPassword } from './security.ts';
 import type { QualityTier } from '../src/types.ts';
+import {
+  buildLuxSourceDriveUrl,
+  extractGoogleDriveFileId,
+} from '../src/utils/playerLogic.ts';
 
 let dbInstance: DatabaseSync | null = null;
 
@@ -127,6 +131,11 @@ function initSchema(db: DatabaseSync): void {
       marked_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (user_id, anime_id)
     );
+
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   // Safe migration for existing databases adding external video source columns
@@ -148,6 +157,35 @@ function initSchema(db: DatabaseSync): void {
     db.exec(
       "ALTER TABLE episode_variants ADD COLUMN external_provider TEXT NOT NULL DEFAULT ''"
     );
+  }
+
+  // One-time migration: upgrade previously saved Google Drive iframe/preview links to LuxSource Worker stream URLs
+  const migratedRow = db
+    .prepare('SELECT value FROM app_meta WHERE key = ?')
+    .get('migrated_gdrive_to_luxsource_v1') as { value: string } | undefined;
+  if (!migratedRow) {
+    const legacyDriveVariants = db
+      .prepare(
+        `SELECT id, external_url
+         FROM episode_variants
+         WHERE source_type = 'external'
+           AND (external_provider = 'gdrive_preview' OR external_url LIKE '%drive.google.com%' OR external_url LIKE '%docs.google.com%')`
+      )
+      .all() as Array<{ id: number; external_url: string }>;
+    const updateStmt = db.prepare(
+      `UPDATE episode_variants
+       SET external_provider = 'gdrive_direct', external_url = ?
+       WHERE id = ?`
+    );
+    for (const row of legacyDriveVariants) {
+      const fileId = extractGoogleDriveFileId(row.external_url);
+      if (fileId) {
+        updateStmt.run(buildLuxSourceDriveUrl(fileId), row.id);
+      }
+    }
+    db.prepare(
+      'INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)'
+    ).run('migrated_gdrive_to_luxsource_v1', 'done');
   }
 }
 

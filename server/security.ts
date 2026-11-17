@@ -202,7 +202,7 @@ export function securityHeadersMiddleware(
   );
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: https:; frame-src 'self' https://drive.google.com https://docs.google.com; connect-src 'self';"
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: https:; frame-src 'self' https://drive.google.com https://docs.google.com; worker-src 'self'; manifest-src 'self'; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com;"
   );
   next();
 }
