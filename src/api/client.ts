@@ -69,7 +69,10 @@ async function apiRequest<T>(
   });
 
   if (!res.ok) {
-    let errMsg = `Błąd serwera (${res.status})`;
+    let errMsg =
+      res.status === 404
+        ? `Błąd serwera (404): brak endpointu API (${url}) na działającym backendzie — zrestartuj proces serwera po aktualizacji kodu.`
+        : `Błąd serwera (${res.status})`;
     try {
       const data = (await res.json()) as { error?: string };
       if (data.error) errMsg = data.error;
@@ -156,10 +159,16 @@ export const api = {
     if (params?.genre) sp.set('genre', String(params.genre));
     if (params?.status) sp.set('status', params.status);
     const qs = sp.toString();
-    return apiRequest<{ anime: AnimeSummary[] }>(
+    return apiRequest<{ anime: AnimeSummary[]; featuredAnimeId?: number | null }>(
       `/api/anime${qs ? `?${qs}` : ''}`
     );
   },
+
+  setFeaturedAnime: (animeId: number | null) =>
+    apiRequest<{ ok: boolean; featuredAnimeId: number | null }>('/api/featured', {
+      method: 'PUT',
+      body: JSON.stringify({ animeId }),
+    }),
 
   getAnimeDetail: (id: number) =>
     apiRequest<{ anime: AnimeDetail }>(`/api/anime/${id}`),
@@ -192,6 +201,10 @@ export const api = {
     folderAudioDub?: AudioDub;
     folderSubtitleMode?: SubtitleMode;
     folderMaxQuality?: QualityTier;
+    folderIntroStart?: number | null;
+    folderIntroEnd?: number | null;
+    folderOutroStart?: number | null;
+    folderOutroEnd?: number | null;
   }) =>
     apiRequest<{
       id: number;
@@ -442,6 +455,15 @@ export const api = {
       {
         method: 'POST',
         body: JSON.stringify({ watched }),
+      }
+    ),
+
+  toggleAnimeWatching: (animeId: number, watching: boolean) =>
+    apiRequest<{ ok: boolean; watching: boolean }>(
+      `/api/anime/${animeId}/watching`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ watching }),
       }
     ),
 

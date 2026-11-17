@@ -18,6 +18,7 @@ import {
   resolveStageTapZone,
   selectBestVariant,
   shouldIgnorePlayerShortcut,
+  sortAnimeAlphabetically,
 } from './playerLogic.ts';
 import {
   extractGoogleDriveFolderId,
@@ -31,6 +32,7 @@ import {
   canViewUserInManagement,
 } from './rbacLogic.ts';
 import {
+  isValidAudioDub,
   isValidPassword,
   isValidUsername,
   sanitizeText,
@@ -293,10 +295,55 @@ test('Google Drive worker mode extracts ID cleanly into luxsource worker URL and
   assert.equal(resolveStageTapZone(0.85), 'right');
 });
 
-test('Continue Watching helper strictly limits items to maximum 5', () => {
-  assert.equal(CONTINUE_WATCHING_LIMIT, 5);
+test('Continue Watching helper strictly limits items to maximum 6', () => {
+  assert.equal(CONTINUE_WATCHING_LIMIT, 6);
   const items = [1, 2, 3, 4, 5, 6, 7, 8];
-  assert.deepEqual(limitContinueWatching(items), [1, 2, 3, 4, 5]);
+  assert.deepEqual(limitContinueWatching(items), [1, 2, 3, 4, 5, 6]);
+});
+
+test('AudioDub supports jp, en, pl, and none while rejecting unknown values', () => {
+  assert.equal(isValidAudioDub('jp'), true);
+  assert.equal(isValidAudioDub('en'), true);
+  assert.equal(isValidAudioDub('pl'), true);
+  assert.equal(isValidAudioDub('none'), true);
+  assert.equal(isValidAudioDub('fr'), false);
+
+  const variants: EpisodeVariant[] = [
+    ...sampleVariants,
+    {
+      ...sampleVariants[0],
+      id: 3,
+      audioDub: 'pl',
+      subtitleMode: 'none',
+    },
+    {
+      ...sampleVariants[0],
+      id: 4,
+      audioDub: 'none',
+      subtitleMode: 'pl',
+    },
+  ];
+  assert.equal(
+    selectBestVariant(variants, { preferredDub: 'pl', preferredSub: 'none' }).variant?.id,
+    3
+  );
+  assert.equal(
+    selectBestVariant(variants, { preferredDub: 'none', preferredSub: 'pl' }).variant?.id,
+    4
+  );
+});
+
+test('sortAnimeAlphabetically sorts anime titles cleanly in Polish alphabetical order', () => {
+  const input = [
+    { id: 1, title: 'Życie w Cieniu' },
+    { id: 2, title: 'Akira' },
+    { id: 3, title: 'Ćma' },
+    { id: 4, title: 'kroniki Astrolabium' },
+  ];
+  assert.deepEqual(
+    sortAnimeAlphabetically(input).map((a) => a.title),
+    ['Akira', 'Ćma', 'kroniki Astrolabium', 'Życie w Cieniu']
+  );
 });
 
 test('Google Drive folder ID extractor handles folder URLs and rejects file URLs', () => {

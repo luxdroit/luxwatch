@@ -27,12 +27,14 @@ export default function App() {
 
   const [activeView, setActiveView] = useState<AppView>('catalog');
   const [animeList, setAnimeList] = useState<AnimeSummary[]>([]);
+  const [featuredAnimeId, setFeaturedAnimeId] = useState<number | null>(null);
   const [genres, setGenres] = useState<Genre[]>([]);
   const [profileStats, setProfileStats] = useState<UserProfileStats>({
     totalWatchSeconds: 0,
     watchedEpisodesCount: 0,
     completedAnimeCount: 0,
     watchedAnimeList: [],
+    watchingAnimeList: [],
     continueWatching: [],
   });
 
@@ -50,6 +52,7 @@ export default function App() {
       api.getProfileStats(),
     ]);
     setAnimeList(animeRes.anime);
+    setFeaturedAnimeId(animeRes.featuredAnimeId ?? null);
     setGenres(genresRes.genres);
     setProfileStats(statsRes.stats);
   }, []);
@@ -88,6 +91,7 @@ export default function App() {
     setSelectedAnime(null);
     setPlayingEpisodeId(null);
     setAnimeList([]);
+    setFeaturedAnimeId(null);
     setActiveView('catalog');
   }
 
@@ -114,6 +118,20 @@ export default function App() {
   async function handleToggleSeriesWatched(animeId: number, watched: boolean) {
     await api.toggleAnimeWatched(animeId, watched);
     await refreshSelectedAnime();
+  }
+
+  async function handleToggleSeriesWatching(
+    animeId: number,
+    watching: boolean
+  ) {
+    await api.toggleAnimeWatching(animeId, watching);
+    await refreshSelectedAnime();
+  }
+
+  async function handleSetFeaturedAnime(animeId: number | null) {
+    const res = await api.setFeaturedAnime(animeId);
+    setFeaturedAnimeId(res.featuredAnimeId ?? null);
+    await refreshLibraryAndStats();
   }
 
   async function handleToggleEpisodeWatched(
@@ -166,16 +184,22 @@ export default function App() {
           <CatalogView
             animeList={animeList}
             genres={genres}
+            userRole={user.role}
+            featuredAnimeId={featuredAnimeId}
             continueWatching={profileStats.continueWatching}
+            watchingAnimeList={profileStats.watchingAnimeList}
             onlyContinueTab={activeView === 'continue'}
             onOpenAnime={(id) => void openAnime(id)}
             onResumeEpisode={(aid, eid) => void openAnime(aid, eid)}
+            onSetFeaturedAnime={handleSetFeaturedAnime}
           />
         )}
 
         {activeView === 'anime' && selectedAnime && (
           <AnimeDetailView
             anime={selectedAnime}
+            genres={genres}
+            canEdit={canManageContent(user.role)}
             onBack={() => setActiveView('catalog')}
             onPlayEpisode={(epId) => {
               setPlayingEpisodeId(epId);
@@ -183,7 +207,9 @@ export default function App() {
             }}
             onOpenRelatedAnime={(aid) => void openAnime(aid)}
             onToggleSeriesWatched={handleToggleSeriesWatched}
+            onToggleSeriesWatching={handleToggleSeriesWatching}
             onToggleEpisodeWatched={handleToggleEpisodeWatched}
+            onRefreshAnime={refreshSelectedAnime}
           />
         )}
 

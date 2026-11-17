@@ -1,6 +1,6 @@
 export type UserRole = 'owner' | 'admin' | 'normal';
 
-export type AudioDub = 'jp' | 'en';
+export type AudioDub = 'jp' | 'en' | 'pl' | 'none';
 
 export type SubtitleMode = 'pl' | 'en' | 'none';
 
@@ -89,6 +89,7 @@ export interface AnimeSummary {
   episodeCount: number;
   watchedEpisodeCount: number;
   isSeriesWatched: boolean;
+  isSeriesWatching: boolean;
   createdAt: string;
 }
 
@@ -109,10 +110,23 @@ export interface ContinueWatchingItem {
   updatedAt: string;
 }
 
+export interface WatchingAnimeItem {
+  animeId: number;
+  animeTitle: string;
+  coverUrl: string;
+  episodeCount: number;
+  watchedEpisodeCount: number;
+  lastWatchedEpisodeId: number | null;
+  lastWatchedEpisodeNumber: number | null;
+  lastWatchedEpisodeTitle: string | null;
+  markedAt: string;
+}
+
 export interface UserProfileStats {
   totalWatchSeconds: number;
   watchedEpisodesCount: number;
   completedAnimeCount: number;
   watchedAnimeList: AnimeSummary[];
+  watchingAnimeList: WatchingAnimeItem[];
   continueWatching: ContinueWatchingItem[];
 }

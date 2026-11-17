@@ -78,6 +78,10 @@ export function ManagementView({
     useState<SubtitleMode>('pl');
   const [folderMaxQuality, setFolderMaxQuality] =
     useState<QualityTier>('1080p');
+  const [folderIntroStart, setFolderIntroStart] = useState('');
+  const [folderIntroEnd, setFolderIntroEnd] = useState('');
+  const [folderOutroStart, setFolderOutroStart] = useState('');
+  const [folderOutroEnd, setFolderOutroEnd] = useState('');
   const [folderPreviewEpisodes, setFolderPreviewEpisodes] = useState<
     Array<{
       fileId: string;
@@ -271,6 +275,33 @@ export function ManagementView({
       setErrorMessage('Podaj tytuł anime.');
       return;
     }
+
+    const parsedFolderIntroStart = folderIntroStart.trim()
+      ? parseTimecodeToSeconds(folderIntroStart)
+      : null;
+    const parsedFolderIntroEnd = folderIntroEnd.trim()
+      ? parseTimecodeToSeconds(folderIntroEnd)
+      : null;
+    const parsedFolderOutroStart = folderOutroStart.trim()
+      ? parseTimecodeToSeconds(folderOutroStart)
+      : null;
+    const parsedFolderOutroEnd = folderOutroEnd.trim()
+      ? parseTimecodeToSeconds(folderOutroEnd)
+      : null;
+
+    if (
+      newDriveFolderUrl.trim() &&
+      ((folderIntroStart.trim() && parsedFolderIntroStart === null) ||
+        (folderIntroEnd.trim() && parsedFolderIntroEnd === null) ||
+        (folderOutroStart.trim() && parsedFolderOutroStart === null) ||
+        (folderOutroEnd.trim() && parsedFolderOutroEnd === null))
+    ) {
+      setErrorMessage(
+        'Podaj poprawny format czasu (np. 01:10 lub sekundy) dla wspólnego Intro i Ending.'
+      );
+      return;
+    }
+
     setCreatingAnime(true);
     try {
       const res = await api.createAnime({
@@ -286,6 +317,10 @@ export function ManagementView({
         folderAudioDub,
         folderSubtitleMode,
         folderMaxQuality,
+        folderIntroStart: parsedFolderIntroStart,
+        folderIntroEnd: parsedFolderIntroEnd,
+        folderOutroStart: parsedFolderOutroStart,
+        folderOutroEnd: parsedFolderOutroEnd,
       });
       setNewTitle('');
       setNewOriginalTitle('');
@@ -295,6 +330,10 @@ export function ManagementView({
       setCoverPreviewName('');
       setNewGenreIds([]);
       setNewDriveFolderUrl('');
+      setFolderIntroStart('');
+      setFolderIntroEnd('');
+      setFolderOutroStart('');
+      setFolderOutroEnd('');
       setFolderPreviewEpisodes([]);
       await onRefreshAll();
       setSelectedAnimeId(res.id);
@@ -303,7 +342,7 @@ export function ManagementView({
       const importedCount = res.importedEpisodesCount || 0;
       if (importedCount > 0) {
         setStatusMessage(
-          `Dodano nową serię anime oraz zaimportowano ${importedCount} odcinków z folderu Google Drive (LuxSource). Po prawej stronie możesz teraz opcjonalnie uzupełnić Intro i Ending.`
+          `Dodano nową serię anime oraz zaimportowano ${importedCount} odcinków z folderu Google Drive (LuxSource). Po prawej stronie możesz opcjonalnie edytować Intro i Ending każdego odcinka.`
         );
         if (res.importedEpisodes && res.importedEpisodes.length > 0) {
           void probeImportedEpisodesDurations(res.id, res.importedEpisodes);
@@ -959,66 +998,148 @@ export function ManagementView({
                   )}
 
                 {newDriveFolderUrl.trim() && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                    <div>
-                      <label
-                        htmlFor="folder-dub"
-                        className="block text-[11px] text-[#A3A8B4] mb-1"
-                      >
-                        Dubbing odcinków
-                      </label>
-                      <select
-                        id="folder-dub"
-                        value={folderAudioDub}
-                        onChange={(e) =>
-                          setFolderAudioDub(e.target.value as AudioDub)
-                        }
-                        className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
-                      >
-                        <option value="jp">Japoński</option>
-                        <option value="en">Angielski</option>
-                      </select>
+                  <div className="space-y-3 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label
+                          htmlFor="folder-dub"
+                          className="block text-[11px] text-[#A3A8B4] mb-1"
+                        >
+                          Dubbing odcinków
+                        </label>
+                        <select
+                          id="folder-dub"
+                          value={folderAudioDub}
+                          onChange={(e) =>
+                            setFolderAudioDub(e.target.value as AudioDub)
+                          }
+                          className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
+                        >
+                          <option value="jp">Japoński</option>
+                          <option value="en">Angielski</option>
+                          <option value="pl">Polski</option>
+                          <option value="none">Brak dubbingu</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="folder-sub"
+                          className="block text-[11px] text-[#A3A8B4] mb-1"
+                        >
+                          Napisy
+                        </label>
+                        <select
+                          id="folder-sub"
+                          value={folderSubtitleMode}
+                          onChange={(e) =>
+                            setFolderSubtitleMode(
+                              e.target.value as SubtitleMode
+                            )
+                          }
+                          className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
+                        >
+                          <option value="pl">Polskie</option>
+                          <option value="en">Angielskie</option>
+                          <option value="none">Bez napisów</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="folder-quality"
+                          className="block text-[11px] text-[#A3A8B4] mb-1"
+                        >
+                          Maks. jakość
+                        </label>
+                        <select
+                          id="folder-quality"
+                          value={folderMaxQuality}
+                          onChange={(e) =>
+                            setFolderMaxQuality(e.target.value as QualityTier)
+                          }
+                          className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
+                        >
+                          <option value="2k">2K (1440p)</option>
+                          <option value="1080p">1080p</option>
+                          <option value="720p">720p</option>
+                          <option value="480p">480p</option>
+                        </select>
+                      </div>
                     </div>
-                    <div>
-                      <label
-                        htmlFor="folder-sub"
-                        className="block text-[11px] text-[#A3A8B4] mb-1"
-                      >
-                        Napisy
-                      </label>
-                      <select
-                        id="folder-sub"
-                        value={folderSubtitleMode}
-                        onChange={(e) =>
-                          setFolderSubtitleMode(e.target.value as SubtitleMode)
-                        }
-                        className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
-                      >
-                        <option value="pl">Polskie</option>
-                        <option value="en">Angielskie</option>
-                        <option value="none">Bez napisów</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="folder-quality"
-                        className="block text-[11px] text-[#A3A8B4] mb-1"
-                      >
-                        Maks. jakość
-                      </label>
-                      <select
-                        id="folder-quality"
-                        value={folderMaxQuality}
-                        onChange={(e) =>
-                          setFolderMaxQuality(e.target.value as QualityTier)
-                        }
-                        className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs text-[#F8F8FA]"
-                      >
-                        <option value="2k">2K (1440p)</option>
-                        <option value="1080p">1080p</option>
-                        <option value="720p">720p</option>
-                        <option value="480p">480p</option>
-                      </select>
+
+                    <div className="space-y-1.5 border-t border-white/10 pt-2.5">
+                      <p className="text-[11px] text-[#A3A8B4]">
+                        Wspólny czas Intro i Ending dla wszystkich odcinków (opcjonalnie — możesz je później edytować osobno):
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div>
+                          <label
+                            htmlFor="folder-intro-start"
+                            className="block text-[11px] text-[#8D92A0] mb-1"
+                          >
+                            Opening od (opc.)
+                          </label>
+                          <input
+                            id="folder-intro-start"
+                            type="text"
+                            value={folderIntroStart}
+                            onChange={(e) =>
+                              setFolderIntroStart(e.target.value)
+                            }
+                            placeholder="01:10"
+                            className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs font-mono tabular-nums text-[#F8F8FA]"
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="folder-intro-end"
+                            className="block text-[11px] text-[#8D92A0] mb-1"
+                          >
+                            Opening do (opc.)
+                          </label>
+                          <input
+                            id="folder-intro-end"
+                            type="text"
+                            value={folderIntroEnd}
+                            onChange={(e) => setFolderIntroEnd(e.target.value)}
+                            placeholder="02:40"
+                            className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs font-mono tabular-nums text-[#F8F8FA]"
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="folder-outro-start"
+                            className="block text-[11px] text-[#8D92A0] mb-1"
+                          >
+                            Ending od (opc.)
+                          </label>
+                          <input
+                            id="folder-outro-start"
+                            type="text"
+                            value={folderOutroStart}
+                            onChange={(e) =>
+                              setFolderOutroStart(e.target.value)
+                            }
+                            placeholder="21:30"
+                            className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs font-mono tabular-nums text-[#F8F8FA]"
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="folder-outro-end"
+                            className="block text-[11px] text-[#8D92A0] mb-1"
+                          >
+                            Ending do (opc.)
+                          </label>
+                          <input
+                            id="folder-outro-end"
+                            type="text"
+                            value={folderOutroEnd}
+                            onChange={(e) => setFolderOutroEnd(e.target.value)}
+                            placeholder="23:00"
+                            className="w-full px-2.5 py-1.5 bg-[#111216] border border-white/15 rounded-lg text-xs font-mono tabular-nums text-[#F8F8FA]"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1362,6 +1483,8 @@ export function ManagementView({
                       >
                         <option value="jp">Japoński dubbing</option>
                         <option value="en">Angielski dubbing</option>
+                        <option value="pl">Polski dubbing</option>
+                        <option value="none">Brak dubbingu</option>
                       </select>
                     </div>
 

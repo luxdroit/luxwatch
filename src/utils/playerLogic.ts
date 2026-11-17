@@ -12,6 +12,8 @@ export const QUALITY_ORDER: QualityTier[] = ['2k', '1080p', '720p', '480p'];
 export const DUB_LABELS: Record<AudioDub, string> = {
   jp: 'Japoński dubbing',
   en: 'Angielski dubbing',
+  pl: 'Polski dubbing',
+  none: 'Brak dubbingu',
 };
 
 export const SUB_LABELS: Record<SubtitleMode, string> = {
@@ -284,7 +286,7 @@ export function buildLuxSourceDriveUrl(fileId: string): string {
   return `${LUXSOURCE_WORKER_BASE}?id=${encodeURIComponent(fileId)}`;
 }
 
-export const CONTINUE_WATCHING_LIMIT = 5;
+export const CONTINUE_WATCHING_LIMIT = 6;
 
 export function limitContinueWatching<T>(
   items: readonly T[],
@@ -292,6 +294,14 @@ export function limitContinueWatching<T>(
 ): T[] {
   if (!Array.isArray(items) || maxItems <= 0) return [];
   return items.slice(0, maxItems);
+}
+
+export function sortAnimeAlphabetically<T extends { title: string }>(
+  items: readonly T[]
+): T[] {
+  return [...items].sort((a, b) =>
+    a.title.localeCompare(b.title, 'pl', { sensitivity: 'base' })
+  );
 }
 
 export function parseExternalVideoSource(

@@ -51,8 +51,10 @@ import {
 } from './src/utils/securityValidation.ts';
 import {
   calculateTotalWatchSeconds,
+  CONTINUE_WATCHING_LIMIT,
   parseExternalVideoSource,
   resolveMaxEpisodeDuration,
+  sortAnimeAlphabetically,
 } from './src/utils/playerLogic.ts';
 import {
   extractGoogleDriveFolderId,
@@ -72,6 +74,7 @@ import type {
   SubtitleMode,
   UserAccount,
   UserRole,
+  WatchingAnimeItem,
 } from './src/types.ts';
 
 ensureStorageDirectories();
@@ -159,6 +162,24 @@ function requireAdminOrOwner(
   }
   if (!canManageContent(user.role)) {
     res.status(403).json({ error: 'Brak uprawnień administratora.' });
+    return;
+  }
+  req.authUser = user;
+  next();
+}
+
+function requireOwner(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  const user = getAuthFromRequest(req);
+  if (!user) {
+    res.status(401).json({ error: 'Wymagane logowanie.' });
+    return;
+  }
+  if (user.role !== 'owner') {
+    res.status(403).json({ error: 'Uprawnienia wyłącznie dla właściciela.' });
     return;
   }
   req.authUser = user;
@@ -568,7 +589,12 @@ function getAnimeSummariesForUser(userId: number): AnimeSummary[] {
     .all(userId) as Array<{ anime_id: number }>;
   const watchedSeriesSet = new Set(watchedSeriesRows.map((w) => w.anime_id));
 
-  return animeRows.map((a) => {
+  const watchingSeriesRows = db
+    .prepare('SELECT anime_id FROM watching_anime WHERE user_id = ?')
+    .all(userId) as Array<{ anime_id: number }>;
+  const watchingSeriesSet = new Set(watchingSeriesRows.map((w) => w.anime_id));
+
+  const summaries: AnimeSummary[] = animeRows.map((a) => {
     const id = Number(a.id);
     const stats = statsByAnime.get(id) || { epCount: 0, watchedCount: 0 };
     return {
@@ -584,9 +610,24 @@ function getAnimeSummariesForUser(userId: number): AnimeSummary[] {
       episodeCount: stats.epCount,
       watchedEpisodeCount: stats.watchedCount,
       isSeriesWatched: watchedSeriesSet.has(id),
+      isSeriesWatching: watchingSeriesSet.has(id),
       createdAt: String(a.created_at),
     };
   });
+
+  return sortAnimeAlphabetically(summaries);
+}
+
+function getFeaturedAnimeId(): number | null {
+  const row = db
+    .prepare("SELECT value FROM app_meta WHERE key = 'featured_anime_id'")
+    .get() as { value: string } | undefined;
+  const parsedId = parsePositiveInt(row?.value);
+  if (!parsedId) return null;
+  const exists = db
+    .prepare('SELECT id FROM anime WHERE id = ?')
+    .get(parsedId) as { id: number } | undefined;
+  return exists ? exists.id : null;
 }
 
 app.get('/api/anime', requireAuth, (req: AuthenticatedRequest, res: Response) => {
@@ -615,8 +656,41 @@ app.get('/api/anime', requireAuth, (req: AuthenticatedRequest, res: Response) =>
     list = list.filter((a) => a.status === statusFilter);
   }
 
-  res.json({ anime: list });
+  res.json({ anime: list, featuredAnimeId: getFeaturedAnimeId() });
 });
+
+app.put(
+  '/api/featured',
+  requireOwner,
+  (req: AuthenticatedRequest, res: Response) => {
+    const rawId = req.body?.animeId;
+    if (rawId === null || rawId === '' || rawId === undefined) {
+      db.prepare("DELETE FROM app_meta WHERE key = 'featured_anime_id'").run();
+      res.json({ ok: true, featuredAnimeId: null });
+      return;
+    }
+
+    const animeId = parsePositiveInt(rawId);
+    if (!animeId) {
+      res.status(400).json({ error: 'Nieprawidłowe ID serii anime.' });
+      return;
+    }
+
+    const anime = db
+      .prepare('SELECT id FROM anime WHERE id = ?')
+      .get(animeId) as { id: number } | undefined;
+    if (!anime) {
+      res.status(404).json({ error: 'Wybrana seria anime nie istnieje.' });
+      return;
+    }
+
+    db.prepare(
+      "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('featured_anime_id', ?)"
+    ).run(String(animeId));
+
+    res.json({ ok: true, featuredAnimeId: animeId });
+  }
+);
 
 app.get(
   '/api/anime/:id',
@@ -932,6 +1006,14 @@ app.post(
       ? req.body.folderSubtitleMode
       : 'pl';
     const qualitySpec = qualityTierSpecs(req.body?.folderMaxQuality);
+    const folderIntroStart = parseNonNegativeIntOrNull(
+      req.body?.folderIntroStart
+    );
+    const folderIntroEnd = parseNonNegativeIntOrNull(req.body?.folderIntroEnd);
+    const folderOutroStart = parseNonNegativeIntOrNull(
+      req.body?.folderOutroStart
+    );
+    const folderOutroEnd = parseNonNegativeIntOrNull(req.body?.folderOutroEnd);
 
     if (title.length < 1) {
       res.status(400).json({ error: 'Podaj tytuł anime.' });
@@ -998,7 +1080,7 @@ app.post(
 
       const insertEpisode = db.prepare(
         `INSERT INTO episodes (anime_id, episode_number, title, synopsis, duration_seconds, intro_start, intro_end, outro_start, outro_end)
-         VALUES (?, ?, ?, '', 0, NULL, NULL, NULL, NULL)`
+         VALUES (?, ?, ?, '', 0, ?, ?, ?, ?)`
       );
       const insertVariant = db.prepare(
         `INSERT INTO episode_variants (
@@ -1011,7 +1093,15 @@ app.post(
 
       for (const ep of folderEpisodes) {
         const epTitle = sanitizeText(ep.title, 160) || `Odcinek ${ep.episodeNumber}`;
-        const epRes = insertEpisode.run(animeId, ep.episodeNumber, epTitle);
+        const epRes = insertEpisode.run(
+          animeId,
+          ep.episodeNumber,
+          epTitle,
+          folderIntroStart,
+          folderIntroEnd,
+          folderOutroStart,
+          folderOutroEnd
+        );
         const episodeId = Number(epRes.lastInsertRowid);
         const varRes = insertVariant.run(
           episodeId,
@@ -1946,6 +2036,9 @@ app.post(
       db.prepare(
         "INSERT OR IGNORE INTO watched_anime (user_id, anime_id, marked_at) VALUES (?, ?, datetime('now'))"
       ).run(userId, animeId);
+      db.prepare(
+        'DELETE FROM watching_anime WHERE user_id = ? AND anime_id = ?'
+      ).run(userId, animeId);
     } else {
       db.prepare(
         'DELETE FROM watched_anime WHERE user_id = ? AND anime_id = ?'
@@ -1978,6 +2071,43 @@ app.post(
   }
 );
 
+app.post(
+  '/api/anime/:id/watching',
+  requireAuth,
+  (req: AuthenticatedRequest, res: Response) => {
+    const userId = req.authUser!.id;
+    const animeId = parsePositiveInt(req.params.id);
+    const watching = Boolean(req.body?.watching);
+    if (!animeId) {
+      res.status(400).json({ error: 'Nieprawidłowe ID anime.' });
+      return;
+    }
+
+    const anime = db
+      .prepare('SELECT id FROM anime WHERE id = ?')
+      .get(animeId) as { id: number } | undefined;
+    if (!anime) {
+      res.status(404).json({ error: 'Anime nie istnieje.' });
+      return;
+    }
+
+    if (watching) {
+      db.prepare(
+        "INSERT OR REPLACE INTO watching_anime (user_id, anime_id, marked_at) VALUES (?, ?, datetime('now'))"
+      ).run(userId, animeId);
+      db.prepare(
+        'DELETE FROM watched_anime WHERE user_id = ? AND anime_id = ?'
+      ).run(userId, animeId);
+    } else {
+      db.prepare(
+        'DELETE FROM watching_anime WHERE user_id = ? AND anime_id = ?'
+      ).run(userId, animeId);
+    }
+
+    res.json({ ok: true, watching });
+  }
+);
+
 app.get(
   '/api/profile/stats',
   requireAuth,
@@ -1998,11 +2128,61 @@ app.get(
     const totalWatchSeconds = calculateTotalWatchSeconds(allEps, watchedEpIds);
 
     const summaries = getAnimeSummariesForUser(userId);
+    const summaryById = new Map(summaries.map((s) => [s.id, s]));
+
     const watchedAnimeList = summaries.filter(
       (a) =>
         a.isSeriesWatched ||
         (a.episodeCount > 0 && a.watchedEpisodeCount >= a.episodeCount)
     );
+
+    const watchingRows = db
+      .prepare(
+        `SELECT wa.anime_id, wa.marked_at, a.title, a.cover_path
+         FROM watching_anime wa
+         JOIN anime a ON a.id = wa.anime_id
+         WHERE wa.user_id = ?
+         ORDER BY wa.marked_at DESC
+         LIMIT ?`
+      )
+      .all(userId, CONTINUE_WATCHING_LIMIT) as Array<{
+      anime_id: number;
+      marked_at: string;
+      title: string;
+      cover_path: string;
+    }>;
+
+    const lastEpStmt = db.prepare(
+      `SELECT e.id as episode_id, e.episode_number, e.title as episode_title
+       FROM watch_progress wp
+       JOIN episodes e ON e.id = wp.episode_id
+       WHERE wp.user_id = ? AND e.anime_id = ? AND (wp.completed = 1 OR wp.position_seconds > 0)
+       ORDER BY wp.updated_at DESC, e.episode_number DESC
+       LIMIT 1`
+    );
+
+    const watchingAnimeList: WatchingAnimeItem[] = watchingRows.map((row) => {
+      const animeId = Number(row.anime_id);
+      const summary = summaryById.get(animeId);
+      const lastEp = lastEpStmt.get(userId, animeId) as
+        | {
+            episode_id: number;
+            episode_number: number;
+            episode_title: string;
+          }
+        | undefined;
+      return {
+        animeId,
+        animeTitle: String(row.title),
+        coverUrl: buildCoverUrl(String(row.cover_path || '')),
+        episodeCount: summary?.episodeCount ?? 0,
+        watchedEpisodeCount: summary?.watchedEpisodeCount ?? 0,
+        lastWatchedEpisodeId: lastEp ? Number(lastEp.episode_id) : null,
+        lastWatchedEpisodeNumber: lastEp ? Number(lastEp.episode_number) : null,
+        lastWatchedEpisodeTitle: lastEp ? String(lastEp.episode_title) : null,
+        markedAt: String(row.marked_at),
+      };
+    });
 
     const cwRows = db
       .prepare(
@@ -2016,9 +2196,9 @@ app.get(
          JOIN anime a ON a.id = e.anime_id
          WHERE wp.user_id = ? AND wp.position_seconds > 0 AND wp.completed = 0
          ORDER BY wp.updated_at DESC
-         LIMIT 5`
+         LIMIT ?`
       )
-      .all(userId) as Array<Record<string, unknown>>;
+      .all(userId, CONTINUE_WATCHING_LIMIT) as Array<Record<string, unknown>>;
 
     const continueWatching: ContinueWatchingItem[] = cwRows.map((r) => ({
       animeId: Number(r.anime_id),
@@ -2038,13 +2218,21 @@ app.get(
         watchedEpisodesCount: watchedEpIds.length,
         completedAnimeCount: watchedAnimeList.length,
         watchedAnimeList,
+        watchingAnimeList,
         continueWatching,
       },
     });
   }
 );
 
-// -------------------- STATIC / VITE SETUP --------------------
+// -------------------- API 404 FALLBACK & STATIC / VITE SETUP --------------------
+
+app.use('/api', (_req: Request, res: Response) => {
+  res.status(404).json({
+    error:
+      'Endpoint API nie istnieje na serwerze. Upewnij się, że backend został zrestartowany po aktualizacji kodu.',
+  });
+});
 
 async function startServer(): Promise<void> {
   const isProd =

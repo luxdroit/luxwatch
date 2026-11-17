@@ -147,6 +147,8 @@ export function ProfileView({
               >
                 <option value="jp">Japoński dubbing</option>
                 <option value="en">Angielski dubbing</option>
+                <option value="pl">Polski dubbing</option>
+                <option value="none">Brak dubbingu</option>
               </select>
             </div>
 

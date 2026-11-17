@@ -20,7 +20,7 @@ export function sanitizeText(input: unknown, maxLength: number): string {
 }
 
 export function isValidAudioDub(val: unknown): val is AudioDub {
-  return val === 'jp' || val === 'en';
+  return val === 'jp' || val === 'en' || val === 'pl' || val === 'none';
 }
 
 export function isValidSubtitleMode(val: unknown): val is SubtitleMode {

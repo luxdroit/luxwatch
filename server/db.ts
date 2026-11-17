@@ -41,7 +41,7 @@ function initSchema(db: DatabaseSync): void {
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'normal')),
-      preferred_dub TEXT NOT NULL DEFAULT 'jp' CHECK(preferred_dub IN ('jp', 'en')),
+      preferred_dub TEXT NOT NULL DEFAULT 'jp' CHECK(preferred_dub IN ('jp', 'en', 'pl', 'none')),
       preferred_sub TEXT NOT NULL DEFAULT 'pl' CHECK(preferred_sub IN ('pl', 'en', 'none')),
       preferred_quality TEXT NOT NULL DEFAULT 'max' CHECK(preferred_quality IN ('max', '2k', '1080p', '720p', '480p')),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -98,7 +98,7 @@ function initSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS episode_variants (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
-      audio_dub TEXT NOT NULL CHECK(audio_dub IN ('jp', 'en')),
+      audio_dub TEXT NOT NULL CHECK(audio_dub IN ('jp', 'en', 'pl', 'none')),
       subtitle_mode TEXT NOT NULL CHECK(subtitle_mode IN ('pl', 'en', 'none')),
       source_type TEXT NOT NULL DEFAULT 'upload' CHECK(source_type IN ('upload', 'external')),
       external_url TEXT NOT NULL DEFAULT '',
@@ -126,6 +126,13 @@ function initSchema(db: DatabaseSync): void {
     );
 
     CREATE TABLE IF NOT EXISTS watched_anime (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      anime_id INTEGER NOT NULL REFERENCES anime(id) ON DELETE CASCADE,
+      marked_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, anime_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS watching_anime (
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       anime_id INTEGER NOT NULL REFERENCES anime(id) ON DELETE CASCADE,
       marked_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -186,6 +193,96 @@ function initSchema(db: DatabaseSync): void {
     db.prepare(
       'INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)'
     ).run('migrated_gdrive_to_luxsource_v1', 'done');
+  }
+
+  // One-time migration: widen CHECK constraints on users.preferred_dub and episode_variants.audio_dub to include 'pl' and 'none'
+  const dubMigrated = db
+    .prepare('SELECT value FROM app_meta WHERE key = ?')
+    .get('migrated_audio_dub_pl_none_v2') as { value: string } | undefined;
+  if (!dubMigrated) {
+    const usersSqlRow = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'")
+      .get() as { sql?: string } | undefined;
+    const variantsSqlRow = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'episode_variants'")
+      .get() as { sql?: string } | undefined;
+
+    const needsUsersRebuild = Boolean(
+      usersSqlRow?.sql && !/preferred_dub[^,)]*'pl'/i.test(usersSqlRow.sql)
+    );
+    const needsVariantsRebuild = Boolean(
+      variantsSqlRow?.sql && !/audio_dub[^,)]*'pl'/i.test(variantsSqlRow.sql)
+    );
+
+    if (needsUsersRebuild || needsVariantsRebuild) {
+      db.exec('PRAGMA foreign_keys = OFF;');
+      db.exec('BEGIN;');
+      try {
+        if (needsUsersRebuild) {
+          db.exec(`
+            CREATE TABLE users_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              username TEXT NOT NULL UNIQUE,
+              password_hash TEXT NOT NULL,
+              role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'normal')),
+              preferred_dub TEXT NOT NULL DEFAULT 'jp' CHECK(preferred_dub IN ('jp', 'en', 'pl', 'none')),
+              preferred_sub TEXT NOT NULL DEFAULT 'pl' CHECK(preferred_sub IN ('pl', 'en', 'none')),
+              preferred_quality TEXT NOT NULL DEFAULT 'max' CHECK(preferred_quality IN ('max', '2k', '1080p', '720p', '480p')),
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO users_new (id, username, password_hash, role, preferred_dub, preferred_sub, preferred_quality, created_at)
+            SELECT id, username, password_hash, role, preferred_dub, preferred_sub, preferred_quality, created_at FROM users;
+            DROP TABLE users;
+            ALTER TABLE users_new RENAME TO users;
+          `);
+        }
+        if (needsVariantsRebuild) {
+          db.exec(`
+            CREATE TABLE episode_variants_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+              audio_dub TEXT NOT NULL CHECK(audio_dub IN ('jp', 'en', 'pl', 'none')),
+              subtitle_mode TEXT NOT NULL CHECK(subtitle_mode IN ('pl', 'en', 'none')),
+              source_type TEXT NOT NULL DEFAULT 'upload' CHECK(source_type IN ('upload', 'external')),
+              external_url TEXT NOT NULL DEFAULT '',
+              external_provider TEXT NOT NULL DEFAULT '',
+              file_path TEXT NOT NULL DEFAULT '',
+              file_size_bytes INTEGER NOT NULL DEFAULT 0,
+              source_width INTEGER NOT NULL DEFAULT 1920,
+              source_height INTEGER NOT NULL DEFAULT 1080,
+              duration_seconds INTEGER NOT NULL DEFAULT 0,
+              available_qualities_json TEXT NOT NULL DEFAULT '["1080p","720p","480p"]',
+              transcoded_paths_json TEXT NOT NULL DEFAULT '{}',
+              transcode_status TEXT NOT NULL DEFAULT 'ready' CHECK(transcode_status IN ('ready', 'processing', 'failed')),
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              UNIQUE(episode_id, audio_dub, subtitle_mode)
+            );
+            INSERT INTO episode_variants_new (
+              id, episode_id, audio_dub, subtitle_mode, source_type, external_url, external_provider,
+              file_path, file_size_bytes, source_width, source_height, duration_seconds,
+              available_qualities_json, transcoded_paths_json, transcode_status, created_at
+            )
+            SELECT
+              id, episode_id, audio_dub, subtitle_mode, source_type, external_url, external_provider,
+              file_path, file_size_bytes, source_width, source_height, duration_seconds,
+              available_qualities_json, transcoded_paths_json, transcode_status, created_at
+            FROM episode_variants;
+            DROP TABLE episode_variants;
+            ALTER TABLE episode_variants_new RENAME TO episode_variants;
+          `);
+        }
+        db.exec('COMMIT;');
+      } catch (err) {
+        db.exec('ROLLBACK;');
+        throw err;
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON;');
+      }
+    }
+
+    db.prepare(
+      'INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)'
+    ).run('migrated_audio_dub_pl_none_v2', 'done');
   }
 }
 
