@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import {
+  AlertCircle,
   FastForward,
   Loader2,
   Maximize,
@@ -24,6 +25,10 @@ import {
   resolveStageTapZone,
   shouldIgnorePlayerShortcut,
 } from '../utils/playerLogic';
+import {
+  attachVideoStreamEngine,
+  type StreamEngineHandle,
+} from '../utils/videoStreamEngine';
 
 interface LuxVideoPlayerProps {
   animeTitle: string;
@@ -90,6 +95,8 @@ export function LuxVideoPlayer({
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const streamEngineRef = useRef<StreamEngineHandle | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -112,6 +119,29 @@ export function LuxVideoPlayer({
   } | null>(null);
 
   const isFullscreen = isNativeFullscreen || isPseudoFullscreen;
+
+  useEffect(() => {
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    setStreamError(null);
+    setBufferedPct(0);
+    setIsBuffering(Boolean(src));
+
+    const handle = attachVideoStreamEngine(vid, src, {
+      onBufferingChange: (buffering) => setIsBuffering(buffering),
+      onError: (msg) => setStreamError(msg),
+      onResumeRestore: () => onTimeUpdate(),
+    });
+    streamEngineRef.current = handle;
+
+    return () => {
+      handle.destroy();
+      streamEngineRef.current = null;
+    };
+    // onTimeUpdate is intentionally omitted so playback ticks never tear down the stream engine
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src, variantKey, videoRef]);
 
   const triggerHudFlash = useCallback(
     (label: string, zone: 'left' | 'center' | 'right' = 'center') => {
@@ -529,21 +559,25 @@ export function LuxVideoPlayer({
       <video
         ref={videoRef}
         key={variantKey}
-        src={src}
         tabIndex={-1}
         autoPlay
         playsInline
+        preload="auto"
         onClick={handleStageTap}
         onPlay={() => {
           setIsPlaying(true);
           setIsBuffering(false);
+          setStreamError(null);
         }}
         onPause={() => {
           setIsPlaying(false);
           onPausePersist();
         }}
         onWaiting={() => setIsBuffering(true)}
-        onPlaying={() => setIsBuffering(false)}
+        onPlaying={() => {
+          setIsBuffering(false);
+          setStreamError(null);
+        }}
         onCanPlay={() => setIsBuffering(false)}
         onProgress={updateBuffered}
         onTimeUpdate={() => {
@@ -586,8 +620,36 @@ export function LuxVideoPlayer({
         </div>
       </div>
 
-      {/* Center Play Affordance (pointer-events-none so double-tap center reaches stage cleanly) or Buffering Spinner */}
-      {isBuffering ? (
+      {/* Center Play Affordance (pointer-events-none so double-tap center reaches stage cleanly), Buffering Spinner, or Error Retry */}
+      {streamError ? (
+        <div
+          role="alert"
+          onClick={(e) => e.stopPropagation()}
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4"
+        >
+          <div className="max-w-sm w-full bg-[#111216] border border-red-500/40 rounded-xl p-4 sm:p-5 text-center space-y-3 shadow-2xl">
+            <AlertCircle
+              className="w-7 h-7 text-red-400 mx-auto"
+              aria-hidden="true"
+            />
+            <p className="text-xs sm:text-sm text-[#E4E4EA] leading-relaxed">
+              {streamError}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setStreamError(null);
+                setIsBuffering(true);
+                streamEngineRef.current?.retry();
+              }}
+              className="min-h-[40px] px-4 py-2 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] text-xs font-semibold rounded-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              <RotateCw className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Spróbuj ponownie</span>
+            </button>
+          </div>
+        </div>
+      ) : isBuffering ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div className="w-14 h-14 rounded-full bg-[#09090B]/80 border border-[#67E8F9]/40 flex items-center justify-center">
             <Loader2

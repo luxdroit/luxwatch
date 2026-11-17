@@ -89,6 +89,76 @@ export function enqueueVariantTranscodes(job: TranscodeJob): void {
   }
 }
 
+async function isMp4FastStart(filePath: string): Promise<boolean> {
+  try {
+    const fd = await fs.promises.open(filePath, 'r');
+    try {
+      const stat = await fd.stat();
+      const fileSize = stat.size;
+      const headerBuf = Buffer.alloc(16);
+      let offset = 0;
+
+      while (offset + 8 <= fileSize) {
+        const { bytesRead } = await fd.read(headerBuf, 0, 16, offset);
+        if (bytesRead < 8) break;
+
+        let boxSize = headerBuf.readUInt32BE(0);
+        const boxType = headerBuf.subarray(4, 8).toString('ascii');
+
+        if (boxType === 'moov') return true;
+        if (boxType === 'mdat') return false;
+
+        if (boxSize === 1) {
+          if (bytesRead < 16) break;
+          const bigSize = headerBuf.readBigUInt64BE(8);
+          if (bigSize < 16n) break;
+          offset += Number(bigSize);
+        } else if (boxSize === 0) {
+          break;
+        } else if (boxSize < 8) {
+          break;
+        } else {
+          offset += boxSize;
+        }
+      }
+    } finally {
+      await fd.close();
+    }
+  } catch {
+    return true;
+  }
+  return true;
+}
+
+async function ensureMp4FastStart(filePath: string): Promise<void> {
+  if (path.extname(filePath).toLowerCase() !== '.mp4') return;
+  const alreadyFastStart = await isMp4FastStart(filePath);
+  if (alreadyFastStart) return;
+
+  const tmpPath = `${filePath}.faststart.mp4`;
+  try {
+    await execFileAsync(
+      'ffmpeg',
+      ['-y', '-i', filePath, '-c', 'copy', '-movflags', '+faststart', tmpPath],
+      { timeout: 10 * 60 * 1000 }
+    );
+    const stat = fs.statSync(tmpPath);
+    if (stat.size > 0) {
+      fs.renameSync(tmpPath, filePath);
+    } else if (fs.existsSync(tmpPath)) {
+      fs.unlinkSync(tmpPath);
+    }
+  } catch {
+    if (fs.existsSync(tmpPath)) {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {
+        // ignore cleanup error
+      }
+    }
+  }
+}
+
 async function processTranscodeQueue(): Promise<void> {
   if (isProcessingQueue) return;
   isProcessingQueue = true;
@@ -102,6 +172,9 @@ async function processTranscodeQueue(): Promise<void> {
       job.onProgress(job.variantId, {}, 'failed');
       continue;
     }
+
+    // Lossless +faststart moov relocation for native MP4 files so playback starts immediately
+    await ensureMp4FastStart(sourcePath);
 
     const nativeQuality = job.availableQualities[0] || '480p';
     const paths: Partial<Record<QualityTier, string>> = {
@@ -224,6 +297,9 @@ function getVideoContentType(filePath: string): string {
   return 'video/mp4';
 }
 
+const DEFAULT_OPEN_RANGE_CHUNK_BYTES = 8 * 1024 * 1024;
+const STREAM_READ_HIGH_WATER_MARK = 256 * 1024;
+
 export function streamVideoWithRange(
   req: Request,
   res: Response,
@@ -237,6 +313,8 @@ export function streamVideoWithRange(
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
   const contentType = getVideoContentType(filePath);
+  const etag = `W/"${fileSize}-${Math.floor(stat.mtimeMs)}"`;
+  const cacheControl = 'private, max-age=3600';
   const range = req.headers.range;
 
   if (range) {
@@ -246,10 +324,18 @@ export function streamVideoWithRange(
       return;
     }
 
-    const start = match[1] ? Number(match[1]) : 0;
-    const end = match[2]
-      ? Math.min(Number(match[2]), fileSize - 1)
-      : Math.min(start + 4 * 1024 * 1024 - 1, fileSize - 1);
+    let start = match[1] ? Number(match[1]) : 0;
+    let end: number;
+    if (!match[1] && match[2]) {
+      // Suffix byte range: bytes=-N
+      const suffixLen = Number(match[2]);
+      start = Math.max(0, fileSize - suffixLen);
+      end = fileSize - 1;
+    } else {
+      end = match[2]
+        ? Math.min(Number(match[2]), fileSize - 1)
+        : Math.min(start + DEFAULT_OPEN_RANGE_CHUNK_BYTES - 1, fileSize - 1);
+    }
 
     if (
       !Number.isFinite(start) ||
@@ -268,13 +354,19 @@ export function streamVideoWithRange(
       'Accept-Ranges': 'bytes',
       'Content-Length': chunkSize,
       'Content-Type': contentType,
-      'Cache-Control': 'private, no-store',
+      'Cache-Control': cacheControl,
+      ETag: etag,
     });
+
+    if (req.method === 'HEAD') {
+      res.end();
+      return;
+    }
 
     const stream = fs.createReadStream(filePath, {
       start,
       end,
-      highWaterMark: 1024 * 1024,
+      highWaterMark: STREAM_READ_HIGH_WATER_MARK,
     });
     stream.on('error', () => {
       if (!res.headersSent) {
@@ -291,11 +383,17 @@ export function streamVideoWithRange(
     'Content-Length': fileSize,
     'Content-Type': contentType,
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'private, no-store',
+    'Cache-Control': cacheControl,
+    ETag: etag,
   });
 
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+
   const stream = fs.createReadStream(filePath, {
-    highWaterMark: 1024 * 1024,
+    highWaterMark: STREAM_READ_HIGH_WATER_MARK,
   });
   stream.on('error', () => {
     if (!res.headersSent) {
