@@ -237,6 +237,7 @@ export interface ParsedExternalSource {
 }
 
 const GDRIVE_ID_RE = /^[a-zA-Z0-9_-]{10,120}$/;
+export const LUXSOURCE_WORKER_BASE = 'https://luxsource.luxdroit.workers.dev/';
 
 export function extractGoogleDriveFileId(input: string): string | null {
   const trimmed = input.trim();
@@ -252,10 +253,11 @@ export function extractGoogleDriveFileId(input: string): string | null {
     if (
       host === 'drive.google.com' ||
       host === 'docs.google.com' ||
+      host === 'drive.usercontent.google.com' ||
       host.endsWith('.drive.google.com')
     ) {
-      // /file/d/<ID>/view or /preview
-      const fileMatch = /\/file\/d\/([a-zA-Z0-9_-]+)/.exec(url.pathname);
+      // /file/d/<ID>/view, /file/u/0/d/<ID>/view, or /preview
+      const fileMatch = /\/d\/([a-zA-Z0-9_-]{10,120})/.exec(url.pathname);
       if (fileMatch?.[1]) return fileMatch[1];
 
       // ?id=<ID>
@@ -269,9 +271,13 @@ export function extractGoogleDriveFileId(input: string): string | null {
   return null;
 }
 
+export function buildLuxSourceDriveUrl(fileId: string): string {
+  return `${LUXSOURCE_WORKER_BASE}?id=${encodeURIComponent(fileId)}`;
+}
+
 export function parseExternalVideoSource(
   rawUrl: string,
-  gdriveMode: 'preview' | 'direct' = 'preview'
+  gdriveMode: 'gdrive_worker' | 'preview' | 'direct' = 'preview'
 ): ParsedExternalSource {
   const trimmed = rawUrl.trim();
   if (!trimmed) {
@@ -285,6 +291,25 @@ export function parseExternalVideoSource(
   }
 
   const gdriveId = extractGoogleDriveFileId(trimmed);
+  if (gdriveMode === 'gdrive_worker') {
+    if (!gdriveId) {
+      return {
+        valid: false,
+        provider: 'direct',
+        normalizedUrl: '',
+        gdriveFileId: null,
+        error:
+          'Nie rozpoznano ID pliku Google Drive. Wklej link w formacie https://drive.google.com/file/d/[ID]/view?usp=sharing lub samo ID.',
+      };
+    }
+    return {
+      valid: true,
+      provider: 'gdrive_direct',
+      normalizedUrl: buildLuxSourceDriveUrl(gdriveId),
+      gdriveFileId: gdriveId,
+    };
+  }
+
   if (gdriveId) {
     if (gdriveMode === 'direct') {
       return {
@@ -387,5 +412,15 @@ export function shouldIgnorePlayerShortcut(
   const upper = tagName.toUpperCase();
   return upper === 'INPUT' || upper === 'TEXTAREA' || upper === 'SELECT';
 }
+
+export function resolveStageTapZone(
+  relativeX: number
+): 'left' | 'center' | 'right' {
+  if (!Number.isFinite(relativeX)) return 'center';
+  if (relativeX < 0.33) return 'left';
+  if (relativeX > 0.67) return 'right';
+  return 'center';
+}
+
 
 

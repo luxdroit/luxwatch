@@ -35,6 +35,10 @@ export default function App() {
   const [selectedAnime, setSelectedAnime] = useState<AnimeDetail | null>(null);
   const [playingEpisodeId, setPlayingEpisodeId] = useState<number | null>(null);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [activeView, selectedAnime?.id, playingEpisodeId]);
+
   const refreshLibraryAndStats = useCallback(async () => {
     const [animeRes, genresRes, statsRes] = await Promise.all([
       api.getAnimeList(),
@@ -147,7 +151,7 @@ export default function App() {
         onLogout={() => void handleLogout()}
       />
 
-      <main className="flex-1">
+      <main className="flex-1 pb-20 md:pb-0">
         {(activeView === 'catalog' || activeView === 'continue') && (
           <CatalogView
             animeList={animeList}

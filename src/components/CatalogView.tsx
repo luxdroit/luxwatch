@@ -57,9 +57,9 @@ export function CatalogView({
 
   if (onlyContinueTab) {
     return (
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-10 space-y-8">
-        <div className="border-b border-white/10 pb-5">
-          <h1 className="font-display text-3xl font-bold tracking-tight text-[#F8F8FA]">
+      <section className="max-w-7xl mx-auto px-3.5 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-8">
+        <div className="border-b border-white/10 pb-4 sm:pb-5">
+          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-[#F8F8FA]">
             Kontynuuj oglądanie
           </h1>
           <p className="text-sm text-[#A3A8B4] mt-1.5">
@@ -68,7 +68,7 @@ export function CatalogView({
         </div>
 
         {continueWatching.length === 0 ? (
-          <div className="bg-[#111216] border border-white/10 rounded-xl p-10 text-center">
+          <div className="bg-[#111216] border border-white/10 rounded-xl p-8 sm:p-10 text-center">
             <p className="text-[#E4E4EA] font-medium mb-2">
               Brak rozpoczętych odcinków
             </p>
@@ -77,7 +77,7 @@ export function CatalogView({
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {continueWatching.map((item) => {
               const pct = Math.min(
                 100,
@@ -123,7 +123,7 @@ export function CatalogView({
                       onClick={() =>
                         onResumeEpisode(item.animeId, item.episodeId)
                       }
-                      className="w-full py-2 px-4 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                      className="w-full min-h-[44px] py-2 px-4 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
                       <span>Wznów odtwarzanie</span>
@@ -139,7 +139,7 @@ export function CatalogView({
   }
 
   return (
-    <div className="pb-16">
+    <div className="pb-10 sm:pb-16">
       {/* Featured Cinema Banner */}
       {featured && (
         <section className="relative border-b border-white/10 overflow-hidden">
@@ -154,15 +154,15 @@ export function CatalogView({
             <div className="absolute inset-0 bg-gradient-to-t from-[#070B10] via-[#070B10]/75 to-[#070B10]/40" />
           </div>
 
-          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-12 lg:py-16 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            <div className="lg:col-span-8 space-y-4">
+          <div className="relative max-w-7xl mx-auto px-3.5 sm:px-6 py-8 sm:py-12 lg:py-16 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-center">
+            <div className="lg:col-span-8 space-y-3 sm:space-y-4">
               <p className="text-xs font-medium tracking-wide text-[#67E8F9]">
                 Polecane w prywatnej bibliotece
               </p>
-              <h1 className="font-display text-3xl sm:text-5xl font-bold tracking-tight text-[#F8F8FA] text-balance">
+              <h1 className="font-display text-2xl sm:text-5xl font-bold tracking-tight text-[#F8F8FA] text-balance">
                 {featured.title}
               </h1>
-              <div className="flex flex-wrap items-center gap-2 text-sm text-[#A3A8B4]">
+              <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-[#A3A8B4]">
                 <span className="tabular-nums">{featured.releaseYear}</span>
                 {featured.studio && (
                   <>
@@ -192,7 +192,7 @@ export function CatalogView({
                 <button
                   type="button"
                   onClick={() => onOpenAnime(featured.id)}
-                  className="px-6 py-2.5 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] font-semibold text-sm rounded-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
+                  className="w-full sm:w-auto min-h-[44px] justify-center px-6 py-2.5 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] font-semibold text-sm rounded-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <Play className="w-4 h-4 fill-current" aria-hidden="true" />
                   <span>Otwórz serię</span>
@@ -213,14 +213,14 @@ export function CatalogView({
         </section>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-10 space-y-12">
+      <div className="max-w-7xl mx-auto px-3.5 sm:px-6 pt-6 sm:pt-10 space-y-8 sm:space-y-12">
         {/* Continue Watching Shelf */}
         {continueWatching.length > 0 && (
           <section aria-labelledby="continue-heading" className="space-y-4">
             <div className="flex items-baseline justify-between">
               <h2
                 id="continue-heading"
-                className="font-display text-xl font-semibold text-[#F8F8FA]"
+                className="font-display text-lg sm:text-xl font-semibold text-[#F8F8FA]"
               >
                 Kontynuuj oglądanie
               </h2>
@@ -230,7 +230,7 @@ export function CatalogView({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
               {continueWatching.slice(0, 6).map((item) => {
                 const pct = Math.min(
                   100,
@@ -279,12 +279,12 @@ export function CatalogView({
         )}
 
         {/* Search & Filters Toolbar */}
-        <section aria-labelledby="catalog-heading" className="space-y-6">
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-white/10 pb-5">
+        <section aria-labelledby="catalog-heading" className="space-y-5 sm:space-y-6">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 border-b border-white/10 pb-4 sm:pb-5">
             <div>
               <h2
                 id="catalog-heading"
-                className="font-display text-2xl font-semibold text-[#F8F8FA]"
+                className="font-display text-xl sm:text-2xl font-semibold text-[#F8F8FA]"
               >
                 Biblioteka Anime
               </h2>
@@ -293,8 +293,8 @@ export function CatalogView({
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="relative min-w-[230px] flex-1 sm:flex-none">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2.5 sm:gap-3 w-full lg:w-auto">
+              <div className="relative col-span-2 sm:min-w-[230px] sm:flex-none">
                 <Search
                   className="w-4 h-4 text-[#A3A8B4] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
                   aria-hidden="true"
@@ -308,11 +308,11 @@ export function CatalogView({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Szukaj tytułu lub studia..."
-                  className="w-full pl-9 pr-3.5 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA] placeholder-[#6E7382] focus:outline-none focus:border-[#67E8F9]"
+                  className="w-full min-h-[44px] pl-9 pr-3.5 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA] placeholder-[#6E7382] focus:outline-none focus:border-[#67E8F9]"
                 />
               </div>
 
-              <div>
+              <div className="col-span-1">
                 <label htmlFor="genre-filter" className="sr-only">
                   Filtruj po gatunku
                 </label>
@@ -320,7 +320,7 @@ export function CatalogView({
                   id="genre-filter"
                   value={selectedGenreId}
                   onChange={(e) => setSelectedGenreId(e.target.value)}
-                  className="px-3.5 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA] focus:outline-none focus:border-[#67E8F9]"
+                  className="w-full min-h-[44px] px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA] focus:outline-none focus:border-[#67E8F9]"
                 >
                   <option value="">Wszystkie gatunki</option>
                   {genres.map((g) => (
@@ -331,7 +331,7 @@ export function CatalogView({
                 </select>
               </div>
 
-              <div>
+              <div className="col-span-1">
                 <label htmlFor="status-filter" className="sr-only">
                   Filtruj po statusie
                 </label>
@@ -339,7 +339,7 @@ export function CatalogView({
                   id="status-filter"
                   value={selectedStatus}
                   onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="px-3.5 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA] focus:outline-none focus:border-[#67E8F9]"
+                  className="w-full min-h-[44px] px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA] focus:outline-none focus:border-[#67E8F9]"
                 >
                   <option value="">Wszystkie statusy</option>
                   <option value="Zakończone">Zakończone</option>
@@ -349,7 +349,7 @@ export function CatalogView({
               </div>
 
               <div
-                className="flex items-center bg-[#111216] border border-white/15 rounded-lg p-0.5"
+                className="col-span-2 flex items-center bg-[#111216] border border-white/15 rounded-lg p-1"
                 role="group"
                 aria-label="Filtr obejrzanych"
               >
@@ -364,7 +364,7 @@ export function CatalogView({
                     key={tab.id}
                     type="button"
                     onClick={() => setWatchedFilter(tab.id)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                    className={`flex-1 sm:flex-none min-h-[36px] px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                       watchedFilter === tab.id
                         ? 'bg-[#67E8F9] text-[#070B10]'
                         : 'text-[#A3A8B4] hover:text-[#F8F8FA]'
@@ -378,7 +378,7 @@ export function CatalogView({
           </div>
 
           {filteredAnime.length === 0 ? (
-            <div className="bg-[#111216] border border-white/10 rounded-xl p-12 text-center space-y-3">
+            <div className="bg-[#111216] border border-white/10 rounded-xl p-10 sm:p-12 text-center space-y-3">
               <p className="text-base font-medium text-[#F8F8FA]">
                 Brak serii spełniających kryteria wyszukiwania
               </p>
@@ -394,14 +394,14 @@ export function CatalogView({
                     setSelectedStatus('');
                     setWatchedFilter('all');
                   }}
-                  className="mt-2 px-4 py-2 text-xs font-semibold bg-white/10 hover:bg-white/15 text-[#F8F8FA] rounded-lg transition-colors cursor-pointer"
+                  className="mt-2 min-h-[40px] px-4 py-2 text-xs font-semibold bg-white/10 hover:bg-white/15 text-[#F8F8FA] rounded-lg transition-colors cursor-pointer"
                 >
                   Wyczyść filtry
                 </button>
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-6">
               {filteredAnime.map((anime) => {
                 const isCompleted =
                   anime.isSeriesWatched ||

@@ -67,50 +67,50 @@ export function ProfileView({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 space-y-10">
+    <div className="max-w-7xl mx-auto px-3.5 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-10">
       {/* Header & Watch Time Summary */}
-      <section className="bg-[#111216] border border-white/10 rounded-xl p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      <section className="bg-[#111216] border border-white/10 rounded-xl p-4 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-5 sm:gap-6">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-xl bg-[#67E8F9]/15 border border-[#67E8F9]/40 flex items-center justify-center shrink-0">
-            <User className="w-7 h-7 text-[#67E8F9]" aria-hidden="true" />
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-[#67E8F9]/15 border border-[#67E8F9]/40 flex items-center justify-center shrink-0">
+            <User className="w-6 h-6 sm:w-7 sm:h-7 text-[#67E8F9]" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#F8F8FA]">
+            <h1 className="font-display text-xl sm:text-3xl font-bold text-[#F8F8FA]">
               {user.username}
             </h1>
-            <p className="text-sm text-[#67E8F9] mt-0.5">
+            <p className="text-xs sm:text-sm text-[#67E8F9] mt-0.5">
               {ROLE_LABELS[user.role]}
             </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-10 border-t lg:border-t-0 lg:border-l border-white/10 pt-5 lg:pt-0 lg:pl-10">
+        <div className="grid grid-cols-3 gap-3 sm:gap-10 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 sm:pt-5 lg:pt-0 lg:pl-10">
           <div>
-            <div className="text-xs text-[#A3A8B4] flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-[#67E8F9]" aria-hidden="true" />
-              <span>Łączny czas oglądania</span>
+            <div className="text-[11px] sm:text-xs text-[#A3A8B4] flex items-center gap-1 sm:gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-[#67E8F9] shrink-0" aria-hidden="true" />
+              <span className="truncate">Czas</span>
             </div>
-            <div className="font-display text-2xl font-bold text-[#F8F8FA] mt-1 tabular-nums">
+            <div className="font-display text-lg sm:text-2xl font-bold text-[#F8F8FA] mt-1 tabular-nums">
               {formatDurationHuman(stats.totalWatchSeconds)}
             </div>
           </div>
 
           <div>
-            <div className="text-xs text-[#A3A8B4] flex items-center gap-1.5">
-              <Film className="w-3.5 h-3.5 text-[#67E8F9]" aria-hidden="true" />
-              <span>Obejrzane odcinki</span>
+            <div className="text-[11px] sm:text-xs text-[#A3A8B4] flex items-center gap-1 sm:gap-1.5">
+              <Film className="w-3.5 h-3.5 text-[#67E8F9] shrink-0" aria-hidden="true" />
+              <span className="truncate">Odcinki</span>
             </div>
-            <div className="font-display text-2xl font-bold text-[#F8F8FA] mt-1 tabular-nums">
+            <div className="font-display text-lg sm:text-2xl font-bold text-[#F8F8FA] mt-1 tabular-nums">
               {stats.watchedEpisodesCount}
             </div>
           </div>
 
           <div>
-            <div className="text-xs text-[#A3A8B4] flex items-center gap-1.5">
-              <Check className="w-3.5 h-3.5 text-[#67E8F9]" aria-hidden="true" />
-              <span>Ukończone serie</span>
+            <div className="text-[11px] sm:text-xs text-[#A3A8B4] flex items-center gap-1 sm:gap-1.5">
+              <Check className="w-3.5 h-3.5 text-[#67E8F9] shrink-0" aria-hidden="true" />
+              <span className="truncate">Serie</span>
             </div>
-            <div className="font-display text-2xl font-bold text-[#F8F8FA] mt-1 tabular-nums">
+            <div className="font-display text-lg sm:text-2xl font-bold text-[#F8F8FA] mt-1 tabular-nums">
               {stats.completedAnimeCount}
             </div>
           </div>

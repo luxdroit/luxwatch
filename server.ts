@@ -1149,6 +1149,8 @@ app.post(
     const audioDub = req.body?.audioDub;
     const subtitleMode = req.body?.subtitleMode;
     const rawUrl = sanitizeText(req.body?.externalUrl, 1000);
+    const externalPlatform =
+      req.body?.externalPlatform === 'other' ? 'other' : 'gdrive';
     const gdriveMode = req.body?.gdriveMode === 'direct' ? 'direct' : 'preview';
     const durationSeconds =
       parseNonNegativeIntOrNull(req.body?.durationSeconds) ?? 0;
@@ -1173,7 +1175,9 @@ app.post(
       return;
     }
 
-    const parsed = parseExternalVideoSource(rawUrl, gdriveMode);
+    const effectiveMode =
+      externalPlatform === 'gdrive' ? 'gdrive_worker' : gdriveMode;
+    const parsed = parseExternalVideoSource(rawUrl, effectiveMode);
     if (!parsed.valid) {
       res
         .status(400)

@@ -13,7 +13,9 @@ import type {
   UserRole,
 } from '../types';
 import {
+  buildLuxSourceDriveUrl,
   DUB_LABELS,
+  extractGoogleDriveFileId,
   formatBytes,
   formatTimecode,
   parseTimecodeToSeconds,
@@ -80,8 +82,11 @@ export function ManagementView({
     total: number;
   } | null>(null);
 
-  // External Source Fields (Google Drive / Direct URL)
+  // External Source Fields (Google Drive LuxSource / Other Platform URL)
   const [externalUrl, setExternalUrl] = useState('');
+  const [externalPlatform, setExternalPlatform] = useState<'gdrive' | 'other'>(
+    'gdrive'
+  );
   const [gdriveMode, setGdriveMode] = useState<'preview' | 'direct'>('preview');
   const [externalMaxQuality, setExternalMaxQuality] =
     useState<QualityTier>('1080p');
@@ -284,6 +289,7 @@ export function ManagementView({
           audioDub: uploadDub,
           subtitleMode: uploadSub,
           externalUrl: externalUrl.trim(),
+          externalPlatform,
           gdriveMode,
           maxQuality: externalMaxQuality,
           durationSeconds: parsedDur,
@@ -294,7 +300,15 @@ export function ManagementView({
         }
         await onRefreshAll();
         setStatusMessage(
-          `Podpięto zewnętrzne źródło (${res.provider === 'gdrive_preview' ? 'Odtwarzacz Google Drive' : res.provider === 'gdrive_direct' ? 'Google Drive strumień' : 'Bezpośredni link wideo'}).`
+          `Podpięto zewnętrzne źródło (${
+            externalPlatform === 'gdrive'
+              ? 'Google Drive — LuxWatch Player'
+              : res.provider === 'gdrive_preview'
+                ? 'Odtwarzacz Google Drive'
+                : res.provider === 'gdrive_direct'
+                  ? 'Google Drive strumień'
+                  : 'Bezpośredni link wideo'
+          }).`
         );
       } catch (err) {
         setErrorMessage(
@@ -449,28 +463,36 @@ export function ManagementView({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/10 pb-5">
         <div>
-          <h1 className="font-display text-3xl font-bold tracking-tight text-[#F8F8FA]">
+          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-[#F8F8FA]">
             Panel zarządzania
           </h1>
           <p className="text-sm text-[#A3A8B4] mt-1">
-            Dodawaj serie anime, odcinki (z pliku lub Google Drive), relacje
-            oraz zarządzaj kontami.
+            Dodawaj serie anime, odcinki (z pliku lub linku zewnętrznego),
+            relacje oraz zarządzaj kontami.
           </p>
         </div>
 
         <div
-          className="flex items-center bg-[#111216] border border-white/15 rounded-lg p-1"
+          className="grid grid-cols-3 sm:flex items-center bg-[#111216] border border-white/15 rounded-xl p-1 gap-1"
           role="tablist"
           aria-label="Sekcje panelu zarządzania"
         >
           {(
             [
-              { id: 'content', label: 'Anime i Odcinki' },
-              { id: 'relations', label: 'Relacje i Gatunki' },
-              { id: 'users', label: 'Konta użytkowników' },
+              { id: 'content', label: 'Anime', desktopLabel: 'Anime i Odcinki' },
+              {
+                id: 'relations',
+                label: 'Relacje',
+                desktopLabel: 'Relacje i Gatunki',
+              },
+              {
+                id: 'users',
+                label: 'Konta',
+                desktopLabel: 'Konta użytkowników',
+              },
             ] as const
           ).map((tab) => (
             <button
@@ -482,13 +504,14 @@ export function ManagementView({
                 clearFeedback();
                 setActiveTab(tab.id);
               }}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-md whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+              className={`min-h-[40px] sm:min-h-0 px-2.5 sm:px-3.5 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                 activeTab === tab.id
                   ? 'bg-[#67E8F9] text-[#070B10]'
                   : 'text-[#A3A8B4] hover:text-[#F8F8FA]'
               }`}
             >
-              {tab.label}
+              <span className="sm:hidden">{tab.label}</span>
+              <span className="hidden sm:inline">{tab.desktopLabel}</span>
             </button>
           ))}
         </div>
@@ -1059,8 +1082,9 @@ export function ManagementView({
                           htmlFor="external-video-url"
                           className="block text-xs text-[#A3A8B4] mb-1.5"
                         >
-                          Link Google Drive (udostępniony dla osób z linkiem),
-                          ID pliku Drive lub bezpośredni adres URL (.mp4/.webm)
+                          {externalPlatform === 'gdrive'
+                            ? 'Link Google Drive (https://drive.google.com/file/d/[ID]/view?usp=sharing) lub samo ID'
+                            : 'Bezpośredni adres URL wideo (.mp4 / .webm) lub link z innej platformy'}
                         </label>
                         <input
                           id="external-video-url"
@@ -1068,37 +1092,111 @@ export function ManagementView({
                           required
                           value={externalUrl}
                           onChange={(e) => setExternalUrl(e.target.value)}
-                          placeholder="https://drive.google.com/file/d/TWOJE_ID_PLIKU/view"
-                          className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA] focus:outline-none focus:border-[#67E8F9]"
+                          placeholder={
+                            externalPlatform === 'gdrive'
+                              ? 'https://drive.google.com/file/d/[ID]/view?usp=sharing'
+                              : 'https://cdn.twojadomena.pl/odcinek1.mp4'
+                          }
+                          className="w-full px-3 py-2.5 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA] focus:outline-none focus:border-[#67E8F9]"
                         />
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div>
-                          <label
-                            htmlFor="gdrive-mode"
-                            className="block text-xs text-[#A3A8B4] mb-1"
+                      {/* Platform Switch: Google Drive (default) vs Inna platforma */}
+                      <div className="space-y-2">
+                        <span className="block text-xs text-[#A3A8B4]">
+                          Platforma źródła zewnętrznego
+                        </span>
+                        <div
+                          className="grid grid-cols-2 sm:inline-flex items-center bg-[#111216] border border-white/15 rounded-lg p-0.5 gap-1"
+                          role="group"
+                          aria-label="Platforma źródła zewnętrznego"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setExternalPlatform('gdrive')}
+                            className={`min-h-[38px] sm:min-h-0 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                              externalPlatform === 'gdrive'
+                                ? 'bg-[#67E8F9] text-[#070B10]'
+                                : 'text-[#A3A8B4] hover:text-[#F8F8FA]'
+                            }`}
                           >
-                            Tryb Google Drive
-                          </label>
-                          <select
-                            id="gdrive-mode"
-                            value={gdriveMode}
-                            onChange={(e) =>
-                              setGdriveMode(
-                                e.target.value as 'preview' | 'direct'
-                              )
-                            }
-                            className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA]"
+                            Google Drive
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setExternalPlatform('other')}
+                            className={`min-h-[38px] sm:min-h-0 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                              externalPlatform === 'other'
+                                ? 'bg-[#67E8F9] text-[#070B10]'
+                                : 'text-[#A3A8B4] hover:text-[#F8F8FA]'
+                            }`}
                           >
-                            <option value="preview">
-                              Odtwarzacz Drive (pliki &gt;100 MB / MKV)
-                            </option>
-                            <option value="direct">
-                              Strumień bezpośredni (mniejsze MP4)
-                            </option>
-                          </select>
+                            Inna platforma
+                          </button>
                         </div>
+
+                        {externalPlatform === 'gdrive' && (() => {
+                          const detectedId = extractGoogleDriveFileId(externalUrl);
+                          if (!externalUrl.trim()) {
+                            return (
+                              <p className="text-[11px] text-[#8D92A0]">
+                                Wyciąga samo ID z linku Google Drive i odtwarza je w naszym playerze przez{' '}
+                                <span className="font-mono text-[#67E8F9]">
+                                  luxsource.luxdroit.workers.dev
+                                </span>
+                                .
+                              </p>
+                            );
+                          }
+                          if (!detectedId) {
+                            return (
+                              <p className="text-[11px] text-amber-300">
+                                Nie rozpoznano jeszcze poprawnego ID pliku Google Drive w tym linku.
+                              </p>
+                            );
+                          }
+                          return (
+                            <p className="text-[11px] text-[#CFFAFE] bg-[#0B151A] border border-[#67E8F9]/30 rounded-lg px-3 py-2 break-all font-mono">
+                              Strumień: {buildLuxSourceDriveUrl(detectedId)}
+                            </p>
+                          );
+                        })()}
+                      </div>
+
+                      <div
+                        className={`grid grid-cols-1 gap-3 ${
+                          externalPlatform === 'other'
+                            ? 'sm:grid-cols-3'
+                            : 'sm:grid-cols-2'
+                        }`}
+                      >
+                        {externalPlatform === 'other' && (
+                          <div>
+                            <label
+                              htmlFor="gdrive-mode"
+                              className="block text-xs text-[#A3A8B4] mb-1"
+                            >
+                              Tryb zewnętrzny
+                            </label>
+                            <select
+                              id="gdrive-mode"
+                              value={gdriveMode}
+                              onChange={(e) =>
+                                setGdriveMode(
+                                  e.target.value as 'preview' | 'direct'
+                                )
+                              }
+                              className="w-full px-3 py-2.5 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA]"
+                            >
+                              <option value="preview">
+                                Osadzony odtwarzacz (Drive / iframe)
+                              </option>
+                              <option value="direct">
+                                Strumień bezpośredni (MP4 / WebM)
+                              </option>
+                            </select>
+                          </div>
+                        )}
 
                         <div>
                           <label
@@ -1115,7 +1213,7 @@ export function ManagementView({
                                 e.target.value as QualityTier
                               )
                             }
-                            className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA]"
+                            className="w-full px-3 py-2.5 bg-[#111216] border border-white/15 rounded-lg text-sm text-[#F8F8FA]"
                           >
                             <option value="2k">2K (1440p)</option>
                             <option value="1080p">1080p Full HD</option>
@@ -1139,7 +1237,7 @@ export function ManagementView({
                               setExternalDurationInput(e.target.value)
                             }
                             placeholder="24:00"
-                            className="w-full px-3 py-2 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
+                            className="w-full px-3 py-2.5 bg-[#111216] border border-white/15 rounded-lg text-sm font-mono tabular-nums text-[#F8F8FA]"
                           />
                         </div>
                       </div>
@@ -1147,7 +1245,7 @@ export function ManagementView({
                       <button
                         type="submit"
                         disabled={uploading || !externalUrl.trim()}
-                        className="px-5 py-2.5 bg-[#67E8F9] hover:bg-[#A5F3FC] disabled:opacity-50 text-[#070B10] text-xs font-semibold rounded-lg inline-flex items-center gap-2 cursor-pointer"
+                        className="w-full sm:w-auto min-h-[44px] sm:min-h-0 px-5 py-2.5 bg-[#67E8F9] hover:bg-[#A5F3FC] disabled:opacity-50 text-[#070B10] text-xs font-semibold rounded-lg inline-flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <Link2 className="w-4 h-4" aria-hidden="true" />
                         <span>
@@ -1224,9 +1322,13 @@ export function ManagementView({
                                   {SUB_LABELS[v.subtitleMode]} ·{' '}
                                   <span className="font-mono text-[#A3A8B4]">
                                     {v.sourceType === 'external'
-                                      ? v.externalProvider.startsWith('gdrive')
-                                        ? 'Google Drive'
-                                        : 'Link zewnętrzny'
+                                      ? v.externalUrl.includes(
+                                          'luxsource.luxdroit.workers.dev'
+                                        )
+                                        ? 'Google Drive (LuxSource)'
+                                        : v.externalProvider.startsWith('gdrive')
+                                          ? 'Google Drive'
+                                          : 'Link zewnętrzny'
                                       : `${v.sourceWidth}×${v.sourceHeight} (${v.availableQualities.join('/')}) · ${formatBytes(v.fileSizeBytes)}`}
                                   </span>
                                 </span>

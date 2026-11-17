@@ -271,15 +271,15 @@ export function PlayerView({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           type="button"
           onClick={onBackToAnime}
-          className="inline-flex items-center gap-2 text-sm text-[#A3A8B4] hover:text-[#F8F8FA] transition-colors cursor-pointer"
+          className="inline-flex items-center gap-2 min-h-[40px] text-sm text-[#A3A8B4] hover:text-[#F8F8FA] transition-colors cursor-pointer"
         >
-          <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-          <span>{anime.title}</span>
+          <ArrowLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
+          <span className="truncate max-w-[180px] sm:max-w-none">{anime.title}</span>
         </button>
 
         <div className="flex items-center gap-2">
@@ -287,7 +287,7 @@ export function PlayerView({
             type="button"
             disabled={!prevEpisode}
             onClick={() => prevEpisode && onSelectEpisode(prevEpisode.id)}
-            className="px-3 py-1.5 text-xs font-medium bg-[#111216] border border-white/15 rounded-lg text-[#F8F8FA] disabled:opacity-40 hover:border-white/30 inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+            className="min-h-[40px] px-3 py-1.5 text-xs font-medium bg-[#111216] border border-white/15 rounded-lg text-[#F8F8FA] disabled:opacity-40 hover:border-white/30 inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
           >
             <ChevronLeft className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Poprzedni</span>
@@ -296,7 +296,7 @@ export function PlayerView({
             type="button"
             disabled={!nextEpisode}
             onClick={() => nextEpisode && onSelectEpisode(nextEpisode.id)}
-            className="px-3 py-1.5 text-xs font-medium bg-[#111216] border border-white/15 rounded-lg text-[#F8F8FA] disabled:opacity-40 hover:border-white/30 inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+            className="min-h-[40px] px-3 py-1.5 text-xs font-medium bg-[#111216] border border-white/15 rounded-lg text-[#F8F8FA] disabled:opacity-40 hover:border-white/30 inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
           >
             <span>Następny</span>
             <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
@@ -411,8 +411,8 @@ export function PlayerView({
           )}
 
           {/* Episode Title + Player Configuration Strip */}
-          <div className="bg-[#111216] border border-white/10 rounded-xl p-5 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="bg-[#111216] border border-white/10 rounded-xl p-4 sm:p-5 space-y-4 sm:space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div>
                 <p className="text-xs font-mono text-[#67E8F9] tabular-nums">
                   Odcinek {episode.episodeNumber} ·{' '}
@@ -420,7 +420,7 @@ export function PlayerView({
                     ? `Czas odcinka: ${formatTimecode(duration || episode.durationSeconds)}`
                     : `${formatTimecode(currentTime)} / ${formatTimecode(duration || episode.durationSeconds)}`}
                 </p>
-                <h1 className="font-display text-xl sm:text-2xl font-semibold text-[#F8F8FA] mt-1">
+                <h1 className="font-display text-lg sm:text-2xl font-semibold text-[#F8F8FA] mt-1">
                   {episode.title}
                 </h1>
               </div>
@@ -428,7 +428,7 @@ export function PlayerView({
               <button
                 type="button"
                 onClick={() => void handleToggleWatched()}
-                className={`px-4 py-2 text-xs font-semibold rounded-lg border inline-flex items-center gap-2 shrink-0 transition-colors cursor-pointer ${
+                className={`w-full sm:w-auto min-h-[44px] justify-center px-4 py-2 text-xs font-semibold rounded-lg border inline-flex items-center gap-2 shrink-0 transition-colors cursor-pointer ${
                   episode.watched
                     ? 'bg-[#67E8F9]/15 border-[#67E8F9] text-[#67E8F9]'
                     : 'bg-[#09090B] border-white/15 text-[#F8F8FA] hover:border-white/30'
@@ -443,7 +443,7 @@ export function PlayerView({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-white/10">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 pt-4 border-t border-white/10">
               {/* Dubbing & Subtitles Variant Selector */}
               <div className="space-y-2">
                 <span className="block text-xs font-medium text-[#A3A8B4]">
@@ -457,7 +457,7 @@ export function PlayerView({
                         key={v.id}
                         type="button"
                         onClick={() => handleSwitchVariant(v.id)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
+                        className={`min-h-[40px] px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
                           active
                             ? 'bg-[#67E8F9] border-[#67E8F9] text-[#070B10]'
                             : 'bg-[#09090B] border-white/15 text-[#E4E4EA] hover:border-white/30'
@@ -499,7 +499,7 @@ export function PlayerView({
                           type="button"
                           disabled={!supported}
                           onClick={() => handleSwitchQuality(q)}
-                          className={`px-3 py-1.5 text-xs font-mono font-medium rounded-lg border transition-colors ${
+                          className={`min-h-[40px] px-3 py-1.5 text-xs font-mono font-medium rounded-lg border transition-colors ${
                             !supported
                               ? 'bg-[#09090B] border-white/5 text-[#525663] cursor-not-allowed'
                               : active

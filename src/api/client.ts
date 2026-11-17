@@ -264,6 +264,7 @@ export const api = {
       audioDub: AudioDub;
       subtitleMode: SubtitleMode;
       externalUrl: string;
+      externalPlatform: 'gdrive' | 'other';
       gdriveMode: 'preview' | 'direct';
       maxQuality: QualityTier;
       durationSeconds: number;

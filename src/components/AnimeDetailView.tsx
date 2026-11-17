@@ -45,12 +45,12 @@ export function AnimeDetailView({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-12">
+    <div className="max-w-7xl mx-auto px-3.5 sm:px-6 py-5 sm:py-8 space-y-8 sm:space-y-12">
       <div>
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-2 text-sm text-[#A3A8B4] hover:text-[#F8F8FA] transition-colors cursor-pointer"
+          className="inline-flex items-center gap-2 min-h-[40px] text-sm text-[#A3A8B4] hover:text-[#F8F8FA] transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" aria-hidden="true" />
           <span>Powrót do katalogu</span>
@@ -58,9 +58,9 @@ export function AnimeDetailView({
       </div>
 
       {/* Hero Detail Split */}
-      <section className="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
+      <section className="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8 items-start">
         <div className="md:col-span-4 lg:col-span-3">
-          <div className="aspect-[3/4] rounded-xl overflow-hidden border border-white/10 bg-[#111216]">
+          <div className="max-w-[200px] sm:max-w-[240px] md:max-w-none mx-auto md:mx-0 aspect-[3/4] rounded-xl overflow-hidden border border-white/10 bg-[#111216]">
             <CoverImage
               src={anime.coverUrl}
               alt={`Okładka ${anime.title}`}
@@ -69,19 +69,19 @@ export function AnimeDetailView({
           </div>
         </div>
 
-        <div className="md:col-span-8 lg:col-span-9 space-y-5">
+        <div className="md:col-span-8 lg:col-span-9 space-y-4 sm:space-y-5">
           <div>
             {anime.originalTitle && (
               <p className="text-xs font-medium text-[#67E8F9] mb-1.5">
                 {anime.originalTitle}
               </p>
             )}
-            <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#F8F8FA] text-balance">
+            <h1 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-[#F8F8FA] text-balance">
               {anime.title}
             </h1>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-sm text-[#A3A8B4]">
+          <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-[#A3A8B4]">
             <span className="tabular-nums">{anime.releaseYear}</span>
             {anime.studio && (
               <>
@@ -107,12 +107,12 @@ export function AnimeDetailView({
             {anime.synopsis || 'Brak opisu dla tej serii.'}
           </p>
 
-          <div className="pt-2 flex flex-wrap items-center gap-3">
+          <div className="pt-2 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3">
             {firstUnwatched && (
               <button
                 type="button"
                 onClick={() => onPlayEpisode(firstUnwatched.id)}
-                className="px-6 py-2.5 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#09090B] font-semibold text-sm rounded-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] justify-center px-6 py-2.5 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#09090B] font-semibold text-sm rounded-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-current" aria-hidden="true" />
                 <span>
@@ -124,7 +124,7 @@ export function AnimeDetailView({
             <button
               type="button"
               onClick={() => onToggleSeriesWatched(anime.id, !isCompleted)}
-              className={`px-5 py-2.5 text-sm font-medium rounded-lg border inline-flex items-center gap-2 transition-colors cursor-pointer ${
+              className={`w-full sm:w-auto min-h-[44px] justify-center px-5 py-2.5 text-sm font-medium rounded-lg border inline-flex items-center gap-2 transition-colors cursor-pointer ${
                 isCompleted
                   ? 'bg-[#67E8F9]/15 border-[#67E8F9] text-[#67E8F9] hover:bg-[#67E8F9]/25'
                   : 'bg-[#111216] border-white/15 text-[#F8F8FA] hover:border-white/30'
@@ -150,7 +150,7 @@ export function AnimeDetailView({
           >
             Powiązane serie
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
             {anime.relations.map((rel) => (
               <button
                 key={rel.id}
@@ -259,7 +259,7 @@ export function AnimeDetailView({
                   )}
                 </div>
 
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-center gap-2.5 sm:gap-3 w-full sm:w-auto shrink-0">
                   <button
                     type="button"
                     onClick={() => onToggleEpisodeWatched(ep.id, !ep.watched)}
@@ -268,21 +268,21 @@ export function AnimeDetailView({
                         ? `Odznacz odcinek ${ep.episodeNumber} jako nieobejrzany`
                         : `Oznacz odcinek ${ep.episodeNumber} jako obejrzany`
                     }
-                    className={`px-3 py-2 text-xs font-medium rounded-lg border inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                    className={`flex-1 sm:flex-none min-h-[42px] justify-center px-3 py-2 text-xs font-medium rounded-lg border inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                       ep.watched
                         ? 'bg-[#67E8F9]/15 border-[#67E8F9]/60 text-[#67E8F9]'
                         : 'bg-[#09090B] border-white/15 text-[#A3A8B4] hover:text-[#F8F8FA]'
                     }`}
                   >
                     <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>{ep.watched ? 'Obejrzane' : 'Oznacz obejrzane'}</span>
+                    <span>{ep.watched ? 'Obejrzane' : 'Oznacz'}</span>
                   </button>
 
                   <button
                     type="button"
                     disabled={ep.variants.length === 0}
                     onClick={() => onPlayEpisode(ep.id)}
-                    className="px-4 py-2 bg-[#67E8F9] hover:bg-[#A5F3FC] disabled:opacity-40 disabled:cursor-not-allowed text-[#09090B] text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                    className="flex-1 sm:flex-none min-h-[42px] justify-center px-4 py-2 bg-[#67E8F9] hover:bg-[#A5F3FC] disabled:opacity-40 disabled:cursor-not-allowed text-[#09090B] text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
                     <span>Odtwarzaj</span>

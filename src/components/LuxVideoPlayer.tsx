@@ -21,6 +21,7 @@ import {
   formatTimecode,
   QUALITY_LABELS,
   QUALITY_ORDER,
+  resolveStageTapZone,
   shouldIgnorePlayerShortcut,
 } from '../utils/playerLogic';
 
@@ -81,6 +82,11 @@ export function LuxVideoPlayer({
   const progressBarRef = useRef<HTMLDivElement | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const hudFlashTimerRef = useRef<number | null>(null);
+  const singleTapTimerRef = useRef<number | null>(null);
+  const lastTapRef = useRef<{
+    time: number;
+    zone: 'left' | 'center' | 'right';
+  } | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -88,7 +94,8 @@ export function LuxVideoPlayer({
   const [volume, setVolume] = useState(1);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [bufferedPct, setBufferedPct] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isHoveringHud, setIsHoveringHud] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -99,17 +106,25 @@ export function LuxVideoPlayer({
   } | null>(null);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
-  const [hudFlash, setHudFlash] = useState<string | null>(null);
+  const [hudFlash, setHudFlash] = useState<{
+    label: string;
+    zone: 'left' | 'center' | 'right';
+  } | null>(null);
 
-  const triggerHudFlash = useCallback((label: string) => {
-    setHudFlash(label);
-    if (hudFlashTimerRef.current) {
-      window.clearTimeout(hudFlashTimerRef.current);
-    }
-    hudFlashTimerRef.current = window.setTimeout(() => {
-      setHudFlash(null);
-    }, 750);
-  }, []);
+  const isFullscreen = isNativeFullscreen || isPseudoFullscreen;
+
+  const triggerHudFlash = useCallback(
+    (label: string, zone: 'left' | 'center' | 'right' = 'center') => {
+      setHudFlash({ label, zone });
+      if (hudFlashTimerRef.current) {
+        window.clearTimeout(hudFlashTimerRef.current);
+      }
+      hudFlashTimerRef.current = window.setTimeout(() => {
+        setHudFlash(null);
+      }, 750);
+    },
+    []
+  );
 
   const revealControls = useCallback(() => {
     setControlsVisible(true);
@@ -139,7 +154,11 @@ export function LuxVideoPlayer({
 
   useEffect(() => {
     function handleFullscreenChange() {
-      setIsFullscreen(document.fullscreenElement === containerRef.current);
+      const active = document.fullscreenElement === containerRef.current;
+      setIsNativeFullscreen(active);
+      if (!active) {
+        setIsPseudoFullscreen(false);
+      }
     }
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => {
@@ -151,6 +170,9 @@ export function LuxVideoPlayer({
     return () => {
       if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
       if (hudFlashTimerRef.current) window.clearTimeout(hudFlashTimerRef.current);
+      if (singleTapTimerRef.current) {
+        window.clearTimeout(singleTapTimerRef.current);
+      }
     };
   }, []);
 
@@ -159,26 +181,28 @@ export function LuxVideoPlayer({
     if (!vid) return;
     if (vid.paused) {
       void vid.play().catch(() => {});
-      triggerHudFlash('Odtwarzanie');
+      triggerHudFlash('Odtwarzanie', 'center');
     } else {
       vid.pause();
-      triggerHudFlash('Pauza');
+      triggerHudFlash('Pauza', 'center');
     }
     revealControls();
   }, [revealControls, triggerHudFlash, videoRef]);
 
   const seekBy = useCallback(
-    (deltaSeconds: number) => {
+    (deltaSeconds: number, zone?: 'left' | 'center' | 'right') => {
       const vid = videoRef.current;
       if (!vid) return;
-      const total = Number.isFinite(vid.duration) && vid.duration > 0
-        ? vid.duration
-        : duration;
+      const total =
+        Number.isFinite(vid.duration) && vid.duration > 0
+          ? vid.duration
+          : duration;
       const next = clampSeekTime(vid.currentTime + deltaSeconds, total);
       vid.currentTime = next;
       onTimeUpdate();
       triggerHudFlash(
-        deltaSeconds > 0 ? `+${deltaSeconds} s` : `${deltaSeconds} s`
+        deltaSeconds > 0 ? `+${deltaSeconds} s` : `${deltaSeconds} s`,
+        zone ?? (deltaSeconds < 0 ? 'left' : 'right')
       );
       revealControls();
     },
@@ -195,20 +219,51 @@ export function LuxVideoPlayer({
       vid.volume = 0.7;
       setVolume(0.7);
     }
-    triggerHudFlash(nextMuted ? 'Wyciszono' : `Głośność ${Math.round(vid.volume * 100)}%`);
+    triggerHudFlash(
+      nextMuted ? 'Wyciszono' : `Głośność ${Math.round(vid.volume * 100)}%`,
+      'center'
+    );
     revealControls();
   }, [revealControls, triggerHudFlash, videoRef]);
 
-  const toggleFullscreen = useCallback(() => {
+  const toggleFullscreen = useCallback(async () => {
     const el = containerRef.current;
     if (!el) return;
-    if (document.fullscreenElement === el) {
-      void document.exitFullscreen().catch(() => {});
-    } else {
-      void el.requestFullscreen?.().catch(() => {});
+
+    if (isNativeFullscreen || isPseudoFullscreen) {
+      if (document.fullscreenElement === el) {
+        try {
+          await document.exitFullscreen();
+        } catch {
+          // ignore exit failure
+        }
+      }
+      setIsPseudoFullscreen(false);
+      triggerHudFlash('Zamknięto pełny ekran', 'center');
+      revealControls();
+      return;
     }
+
+    let enteredNative = false;
+    if (typeof el.requestFullscreen === 'function') {
+      try {
+        await el.requestFullscreen();
+        enteredNative = true;
+      } catch {
+        enteredNative = false;
+      }
+    }
+    if (!enteredNative) {
+      setIsPseudoFullscreen(true);
+    }
+    triggerHudFlash('Pełny ekran', 'center');
     revealControls();
-  }, [revealControls]);
+  }, [
+    isNativeFullscreen,
+    isPseudoFullscreen,
+    revealControls,
+    triggerHudFlash,
+  ]);
 
   // Global keyboard shortcuts: works immediately without clicking/focusing the video
   useEffect(() => {
@@ -225,6 +280,11 @@ export function LuxVideoPlayer({
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       const key = e.key;
+      if (key === 'Escape' && isPseudoFullscreen) {
+        e.preventDefault();
+        setIsPseudoFullscreen(false);
+        return;
+      }
       if (key === ' ' || key === 'Spacebar' || key === 'k' || key === 'K') {
         e.preventDefault();
         if (active && active.tagName === 'BUTTON') {
@@ -235,12 +295,12 @@ export function LuxVideoPlayer({
       }
       if (key === 'ArrowRight' || key === 'l' || key === 'L') {
         e.preventDefault();
-        seekBy(key === 'ArrowRight' ? 5 : 10);
+        seekBy(key === 'ArrowRight' ? 5 : 10, 'right');
         return;
       }
       if (key === 'ArrowLeft' || key === 'j' || key === 'J') {
         e.preventDefault();
-        seekBy(key === 'ArrowLeft' ? -5 : -10);
+        seekBy(key === 'ArrowLeft' ? -5 : -10, 'left');
         return;
       }
       if (key === 'ArrowUp') {
@@ -252,7 +312,7 @@ export function LuxVideoPlayer({
         vid.muted = false;
         setVolume(nextVol);
         setIsMuted(false);
-        triggerHudFlash(`Głośność ${Math.round(nextVol * 100)}%`);
+        triggerHudFlash(`Głośność ${Math.round(nextVol * 100)}%`, 'center');
         revealControls();
         return;
       }
@@ -265,7 +325,7 @@ export function LuxVideoPlayer({
         vid.muted = nextVol === 0;
         setVolume(nextVol);
         setIsMuted(nextVol === 0);
-        triggerHudFlash(`Głośność ${Math.round(nextVol * 100)}%`);
+        triggerHudFlash(`Głośność ${Math.round(nextVol * 100)}%`, 'center');
         revealControls();
         return;
       }
@@ -276,7 +336,7 @@ export function LuxVideoPlayer({
       }
       if (key === 'f' || key === 'F') {
         e.preventDefault();
-        toggleFullscreen();
+        void toggleFullscreen();
       }
     }
 
@@ -285,6 +345,7 @@ export function LuxVideoPlayer({
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [
+    isPseudoFullscreen,
     revealControls,
     seekBy,
     toggleFullscreen,
@@ -293,6 +354,47 @@ export function LuxVideoPlayer({
     triggerHudFlash,
     videoRef,
   ]);
+
+  // Unified mobile touch & desktop click stage gesture handler:
+  // - Single tap/click anywhere on stage -> Play / Pause
+  // - Double tap/click left -> -5s
+  // - Double tap/click center -> Toggle Fullscreen (enter or exit)
+  // - Double tap/click right -> +5s
+  function handleStageTap(e: React.MouseEvent<HTMLVideoElement>) {
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / Math.max(1, rect.width);
+    const zone = resolveStageTapZone(relX);
+    const now = Date.now();
+    const prev = lastTapRef.current;
+
+    if (prev && now - prev.time <= 280 && prev.zone === zone) {
+      if (singleTapTimerRef.current) {
+        window.clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = null;
+      }
+      lastTapRef.current = null;
+
+      if (zone === 'left') {
+        seekBy(-5, 'left');
+      } else if (zone === 'right') {
+        seekBy(5, 'right');
+      } else {
+        void toggleFullscreen();
+      }
+      return;
+    }
+
+    lastTapRef.current = { time: now, zone };
+    if (singleTapTimerRef.current) {
+      window.clearTimeout(singleTapTimerRef.current);
+    }
+    singleTapTimerRef.current = window.setTimeout(() => {
+      singleTapTimerRef.current = null;
+      lastTapRef.current = null;
+      togglePlayPause();
+    }, 260);
+  }
 
   const effectiveDuration = duration > 0 ? duration : 0;
   const progressPct =
@@ -349,6 +451,7 @@ export function LuxVideoPlayer({
 
   function handleProgressPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();
+    e.stopPropagation();
     setIsScrubbing(true);
     const initial = computeSeekPositionFromClientX(e.clientX);
     if (initial) {
@@ -366,6 +469,7 @@ export function LuxVideoPlayer({
 
     const onUp = () => {
       setIsScrubbing(false);
+      setHoverTime(null);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
@@ -414,10 +518,12 @@ export function LuxVideoPlayer({
           setSpeedMenuOpen(false);
         }
       }}
-      className={`lux-player-root relative aspect-video bg-black overflow-hidden select-none outline-none focus:outline-none ${
-        isFullscreen
-          ? 'w-screen h-screen rounded-none border-0'
-          : 'rounded-xl border border-white/15 shadow-[0_24px_60px_rgba(0,0,0,0.65)]'
+      className={`lux-player-root relative bg-black overflow-hidden select-none outline-none focus:outline-none touch-manipulation ${
+        isPseudoFullscreen
+          ? 'fixed inset-0 z-50 w-screen h-screen rounded-none border-0'
+          : isNativeFullscreen
+            ? 'w-screen h-screen rounded-none border-0'
+            : 'aspect-video rounded-xl border border-white/15 shadow-[0_24px_60px_rgba(0,0,0,0.65)]'
       } ${!controlsVisible && isPlaying ? 'cursor-none' : 'cursor-default'}`}
     >
       <video
@@ -427,8 +533,7 @@ export function LuxVideoPlayer({
         tabIndex={-1}
         autoPlay
         playsInline
-        onClick={togglePlayPause}
-        onDoubleClick={toggleFullscreen}
+        onClick={handleStageTap}
         onPlay={() => {
           setIsPlaying(true);
           setIsBuffering(false);
@@ -464,7 +569,7 @@ export function LuxVideoPlayer({
 
       {/* Top Cinema Scrim & Title */}
       <div
-        className={`pointer-events-none absolute inset-x-0 top-0 px-5 pt-4 pb-10 bg-gradient-to-b from-black/80 via-black/35 to-transparent transition-opacity duration-200 flex items-center justify-between gap-4 ${
+        className={`pointer-events-none absolute inset-x-0 top-0 px-3.5 sm:px-5 pt-3 sm:pt-4 pb-8 sm:pb-10 bg-gradient-to-b from-black/80 via-black/35 to-transparent transition-opacity duration-200 flex items-center justify-between gap-3 ${
           controlsVisible ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -472,7 +577,7 @@ export function LuxVideoPlayer({
           <div className="text-[11px] font-mono text-[#67E8F9] tracking-wide truncate">
             {animeTitle} · Odcinek {episodeNumber}
           </div>
-          <div className="text-sm font-display font-semibold text-[#F8F8FA] truncate">
+          <div className="text-xs sm:text-sm font-display font-semibold text-[#F8F8FA] truncate">
             {episodeTitle}
           </div>
         </div>
@@ -481,7 +586,7 @@ export function LuxVideoPlayer({
         </div>
       </div>
 
-      {/* Center Play Overlay (when paused) or Buffering Spinner */}
+      {/* Center Play Affordance (pointer-events-none so double-tap center reaches stage cleanly) or Buffering Spinner */}
       {isBuffering ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div className="w-14 h-14 rounded-full bg-[#09090B]/80 border border-[#67E8F9]/40 flex items-center justify-center">
@@ -493,38 +598,49 @@ export function LuxVideoPlayer({
         </div>
       ) : (
         !isPlaying && (
-          <button
-            type="button"
-            tabIndex={-1}
-            onClick={togglePlayPause}
-            aria-label="Odtwórz odcinek"
-            className="absolute inset-0 m-auto w-16 h-16 rounded-full bg-[#09090B]/80 hover:bg-[#67E8F9] text-[#67E8F9] hover:text-[#070B10] border border-[#67E8F9]/70 flex items-center justify-center transition-all duration-200 cursor-pointer shadow-[0_0_32px_rgba(103,232,249,0.2)] outline-none focus:outline-none"
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 m-auto w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#09090B]/80 text-[#67E8F9] border border-[#67E8F9]/70 flex items-center justify-center shadow-[0_0_32px_rgba(103,232,249,0.2)]"
           >
-            <Play className="w-7 h-7 fill-current ml-0.5" aria-hidden="true" />
-          </button>
+            <Play
+              className="w-6 h-6 sm:w-7 sm:h-7 fill-current ml-0.5"
+              aria-hidden="true"
+            />
+          </div>
         )
       )}
 
-      {/* Brief Keyboard Shortcut Feedback */}
+      {/* Brief Keyboard / Touch Gesture Feedback */}
       {hudFlash && (
-        <div className="pointer-events-none absolute top-16 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-lg bg-[#09090B]/85 backdrop-blur-md border border-[#67E8F9]/45 text-xs font-mono font-semibold text-[#CFFAFE]">
-          {hudFlash}
+        <div
+          className={`pointer-events-none absolute z-30 px-3.5 py-1.5 rounded-lg bg-[#09090B]/85 backdrop-blur-md border border-[#67E8F9]/45 text-xs font-mono font-semibold text-[#CFFAFE] ${
+            hudFlash.zone === 'left'
+              ? 'top-1/2 -translate-y-1/2 left-6 sm:left-12'
+              : hudFlash.zone === 'right'
+                ? 'top-1/2 -translate-y-1/2 right-6 sm:right-12'
+                : 'top-14 sm:top-16 left-1/2 -translate-x-1/2'
+          }`}
+        >
+          {hudFlash.label}
         </div>
       )}
 
-      {/* Floating SKIP INTRO / SKIP TO NEXT Overlays (work in fullscreen too) */}
+      {/* Floating SKIP INTRO / SKIP TO NEXT Overlays */}
       {(skipState.showSkipIntro || skipState.showSkipToNext) && (
         <div
-          className={`absolute right-5 z-20 flex flex-col gap-2 items-end transition-all duration-200 ${
-            controlsVisible ? 'bottom-24' : 'bottom-6'
+          className={`absolute right-3 sm:right-5 z-20 flex flex-col gap-2 items-end transition-all duration-200 ${
+            controlsVisible ? 'bottom-24 sm:bottom-24' : 'bottom-5 sm:bottom-6'
           }`}
         >
           {skipState.showSkipIntro && (
             <button
               type="button"
               tabIndex={-1}
-              onClick={onSkipIntro}
-              className="px-4 py-2 bg-[#09090B]/90 backdrop-blur-md hover:bg-[#67E8F9] text-[#F8F8FA] hover:text-[#070B10] border border-[#67E8F9] text-xs font-semibold rounded-lg shadow-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSkipIntro();
+              }}
+              className="min-h-[40px] px-3.5 sm:px-4 py-2 bg-[#09090B]/90 backdrop-blur-md hover:bg-[#67E8F9] text-[#F8F8FA] hover:text-[#070B10] border border-[#67E8F9] text-xs font-semibold rounded-lg shadow-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
             >
               <FastForward className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Pomiń intro (SKIP INTRO)</span>
@@ -534,8 +650,11 @@ export function LuxVideoPlayer({
             <button
               type="button"
               tabIndex={-1}
-              onClick={onSkipToNext}
-              className="px-4 py-2 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] text-xs font-semibold rounded-lg shadow-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSkipToNext();
+              }}
+              className="min-h-[40px] px-3.5 sm:px-4 py-2 bg-[#67E8F9] hover:bg-[#A5F3FC] text-[#070B10] text-xs font-semibold rounded-lg shadow-lg inline-flex items-center gap-2 transition-colors cursor-pointer"
             >
               <SkipForward className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Następny odcinek (SKIP TO NEXT)</span>
@@ -548,7 +667,8 @@ export function LuxVideoPlayer({
       <div
         onMouseEnter={() => setIsHoveringHud(true)}
         onMouseLeave={() => setIsHoveringHud(false)}
-        className={`absolute inset-x-0 bottom-0 z-20 pt-10 pb-3 px-4 sm:px-5 bg-gradient-to-t from-black/95 via-black/75 to-transparent transition-opacity duration-200 ${
+        onClick={(e) => e.stopPropagation()}
+        className={`absolute inset-x-0 bottom-0 z-20 pt-8 sm:pt-10 pb-2.5 sm:pb-3 px-3 sm:px-5 bg-gradient-to-t from-black/95 via-black/75 to-transparent transition-opacity duration-200 ${
           controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
@@ -569,14 +689,14 @@ export function LuxVideoPlayer({
           onMouseLeave={() => {
             if (!isScrubbing) setHoverTime(null);
           }}
-          className="relative h-5 flex items-center cursor-pointer group/bar"
+          className="relative h-7 sm:h-5 flex items-center cursor-pointer group/bar touch-none"
         >
           {/* Hover Timestamp Tooltip */}
           {hoverTime && (
             <div
               className="pointer-events-none absolute -top-8 -translate-x-1/2 px-2 py-1 rounded bg-[#09090B]/95 border border-white/15 text-[11px] font-mono tabular-nums text-[#F8F8FA] whitespace-nowrap shadow-lg"
               style={{
-                left: `${Math.min(96, Math.max(4, hoverTime.pct))}%`,
+                left: `${Math.min(94, Math.max(6, hoverTime.pct))}%`,
               }}
             >
               {formatTimecode(hoverTime.seconds)}
@@ -588,12 +708,10 @@ export function LuxVideoPlayer({
 
           {/* Rail */}
           <div className="relative w-full h-1.5 group-hover/bar:h-2 transition-all rounded-full bg-white/15 overflow-hidden">
-            {/* Buffered */}
             <div
               className="absolute inset-y-0 left-0 bg-white/25"
               style={{ width: `${bufferedPct}%` }}
             />
-            {/* Intro / Outro Markers */}
             {markers.intro && (
               <div
                 className="absolute inset-y-0 bg-[#67E8F9]/45"
@@ -612,30 +730,28 @@ export function LuxVideoPlayer({
                 }}
               />
             )}
-            {/* Played Aqua Progress */}
             <div
               className="absolute inset-y-0 left-0 bg-[#67E8F9]"
               style={{ width: `${progressPct}%` }}
             />
           </div>
 
-          {/* Scrubber Thumb */}
           <div
-            className="pointer-events-none absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-[#67E8F9] shadow-[0_0_12px_rgba(103,232,249,0.85)] opacity-0 group-hover/bar:opacity-100 transition-opacity"
+            className="pointer-events-none absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-[#67E8F9] shadow-[0_0_12px_rgba(103,232,249,0.85)] sm:opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ left: `${progressPct}%` }}
           />
         </div>
 
         {/* Control Buttons Row */}
-        <div className="mt-1.5 flex items-center justify-between gap-3">
+        <div className="mt-1 flex items-center justify-between gap-2 sm:gap-3">
           {/* Left Controls */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+          <div className="flex items-center gap-1 sm:gap-2 min-w-0">
             <button
               type="button"
               tabIndex={-1}
               onClick={togglePlayPause}
               aria-label={isPlaying ? 'Pauza' : 'Odtwórz'}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-[#F8F8FA] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
+              className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[#F8F8FA] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
             >
               {isPlaying ? (
                 <Pause className="w-4 h-4 fill-current" aria-hidden="true" />
@@ -647,9 +763,9 @@ export function LuxVideoPlayer({
             <button
               type="button"
               tabIndex={-1}
-              onClick={() => seekBy(-10)}
-              aria-label="Cofnij o 10 sekund"
-              className="w-8 h-8 rounded-lg hidden sm:flex items-center justify-center text-[#D4D6DE] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
+              onClick={() => seekBy(-5, 'left')}
+              aria-label="Cofnij o 5 sekund"
+              className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[#D4D6DE] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -657,9 +773,9 @@ export function LuxVideoPlayer({
             <button
               type="button"
               tabIndex={-1}
-              onClick={() => seekBy(10)}
-              aria-label="Przewiń o 10 sekund"
-              className="w-8 h-8 rounded-lg hidden sm:flex items-center justify-center text-[#D4D6DE] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
+              onClick={() => seekBy(5, 'right')}
+              aria-label="Przewiń o 5 sekund"
+              className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[#D4D6DE] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
             >
               <RotateCw className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -671,7 +787,7 @@ export function LuxVideoPlayer({
                 tabIndex={-1}
                 onClick={toggleMute}
                 aria-label={isMuted ? 'Odcisz' : 'Wycisz'}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#D4D6DE] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
+                className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[#D4D6DE] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
               >
                 {isMuted || volume === 0 ? (
                   <VolumeX className="w-4 h-4" aria-hidden="true" />
@@ -695,7 +811,7 @@ export function LuxVideoPlayer({
             </div>
 
             {/* Timecode */}
-            <div className="pl-1 text-xs font-mono tabular-nums text-[#E4E4EA] whitespace-nowrap">
+            <div className="pl-0.5 sm:pl-1 text-[11px] sm:text-xs font-mono tabular-nums text-[#E4E4EA] whitespace-nowrap">
               <span>{formatTimecode(currentTime)}</span>
               <span className="text-[#737887] mx-1">/</span>
               <span className="text-[#A3A8B4]">
@@ -705,7 +821,7 @@ export function LuxVideoPlayer({
           </div>
 
           {/* Right Controls */}
-          <div className="flex items-center gap-1.5 relative shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 relative shrink-0">
             {/* Playback Speed Menu */}
             <div className="relative">
               <button
@@ -716,19 +832,19 @@ export function LuxVideoPlayer({
                   setQualityMenuOpen(false);
                 }}
                 aria-label="Prędkość odtwarzania"
-                className="px-2.5 py-1 rounded-md text-xs font-mono font-medium text-[#E4E4EA] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
+                className="min-h-[36px] px-2 sm:px-2.5 py-1 rounded-md text-xs font-mono font-medium text-[#E4E4EA] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
               >
                 {playbackRate}x
               </button>
               {speedMenuOpen && (
-                <div className="absolute bottom-10 right-0 w-24 bg-[#111216]/95 backdrop-blur-md border border-white/15 rounded-lg py-1 shadow-xl z-30">
+                <div className="absolute bottom-11 right-0 w-24 bg-[#111216]/95 backdrop-blur-md border border-white/15 rounded-lg py-1 shadow-xl z-30">
                   {PLAYBACK_RATES.map((rate) => (
                     <button
                       key={rate}
                       type="button"
                       tabIndex={-1}
                       onClick={() => handlePlaybackRate(rate)}
-                      className={`w-full text-left px-3 py-1.5 text-xs font-mono transition-colors cursor-pointer ${
+                      className={`w-full text-left px-3 py-2 text-xs font-mono transition-colors cursor-pointer ${
                         playbackRate === rate
                           ? 'text-[#070B10] bg-[#67E8F9] font-semibold'
                           : 'text-[#E4E4EA] hover:bg-white/10'
@@ -752,12 +868,12 @@ export function LuxVideoPlayer({
                     setSpeedMenuOpen(false);
                   }}
                   aria-label="Jakość obrazu"
-                  className="px-2.5 py-1 rounded-md text-xs font-mono font-semibold text-[#67E8F9] bg-[#0B151A]/90 border border-[#67E8F9]/35 hover:border-[#67E8F9] transition-colors cursor-pointer"
+                  className="min-h-[36px] px-2 sm:px-2.5 py-1 rounded-md text-xs font-mono font-semibold text-[#67E8F9] bg-[#0B151A]/90 border border-[#67E8F9]/35 hover:border-[#67E8F9] transition-colors cursor-pointer"
                 >
                   {selectedQuality.toUpperCase()}
                 </button>
                 {qualityMenuOpen && (
-                  <div className="absolute bottom-10 right-0 w-36 bg-[#111216]/95 backdrop-blur-md border border-white/15 rounded-lg py-1 shadow-xl z-30">
+                  <div className="absolute bottom-11 right-0 w-36 bg-[#111216]/95 backdrop-blur-md border border-white/15 rounded-lg py-1 shadow-xl z-30">
                     {QUALITY_ORDER.filter((q) =>
                       availableQualities.includes(q)
                     ).map((q) => (
@@ -769,7 +885,7 @@ export function LuxVideoPlayer({
                           onSwitchQuality(q);
                           setQualityMenuOpen(false);
                         }}
-                        className={`w-full text-left px-3 py-1.5 text-xs font-mono transition-colors cursor-pointer ${
+                        className={`w-full text-left px-3 py-2 text-xs font-mono transition-colors cursor-pointer ${
                           selectedQuality === q
                             ? 'text-[#070B10] bg-[#67E8F9] font-semibold'
                             : 'text-[#E4E4EA] hover:bg-white/10'
@@ -787,11 +903,11 @@ export function LuxVideoPlayer({
             <button
               type="button"
               tabIndex={-1}
-              onClick={toggleFullscreen}
+              onClick={() => void toggleFullscreen()}
               aria-label={
                 isFullscreen ? 'Wyjdź z pełnego ekranu' : 'Pełny ekran'
               }
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-[#F8F8FA] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
+              className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[#F8F8FA] hover:text-[#67E8F9] hover:bg-white/10 transition-colors cursor-pointer"
             >
               {isFullscreen ? (
                 <Minimize className="w-4 h-4" aria-hidden="true" />

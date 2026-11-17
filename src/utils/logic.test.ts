@@ -12,6 +12,7 @@ import {
   parseExternalVideoSource,
   parseTimecodeToSeconds,
   resolveBestQuality,
+  resolveStageTapZone,
   selectBestVariant,
   shouldIgnorePlayerShortcut,
 } from './playerLogic.ts';
@@ -229,5 +230,39 @@ test('custom player timeline markers, seek clamping, and shortcut guard behave c
   assert.equal(shouldIgnorePlayerShortcut('BODY', false), false);
   assert.equal(shouldIgnorePlayerShortcut('BUTTON', false), false);
 });
+
+test('Google Drive worker mode extracts ID cleanly into luxsource worker URL and tap zones resolve accurately', () => {
+  const workerRes = parseExternalVideoSource(
+    'https://drive.google.com/file/d/1AbCDefGhIjKlMnOpQrStUvWxYz123456/view?usp=sharing',
+    'gdrive_worker'
+  );
+  assert.equal(workerRes.valid, true);
+  assert.equal(workerRes.provider, 'gdrive_direct');
+  assert.equal(
+    workerRes.normalizedUrl,
+    'https://luxsource.luxdroit.workers.dev/?id=1AbCDefGhIjKlMnOpQrStUvWxYz123456'
+  );
+
+  const multiAcctRes = parseExternalVideoSource(
+    'https://drive.google.com/file/u/0/d/1AbCDefGhIjKlMnOpQrStUvWxYz123456/view',
+    'gdrive_worker'
+  );
+  assert.equal(multiAcctRes.valid, true);
+  assert.equal(
+    multiAcctRes.normalizedUrl,
+    'https://luxsource.luxdroit.workers.dev/?id=1AbCDefGhIjKlMnOpQrStUvWxYz123456'
+  );
+
+  const invalidWorkerRes = parseExternalVideoSource(
+    'https://example.com/not-drive.mp4',
+    'gdrive_worker'
+  );
+  assert.equal(invalidWorkerRes.valid, false);
+
+  assert.equal(resolveStageTapZone(0.15), 'left');
+  assert.equal(resolveStageTapZone(0.5), 'center');
+  assert.equal(resolveStageTapZone(0.85), 'right');
+});
+
 
 
